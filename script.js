@@ -1,4 +1,4 @@
-const BADGE_IDS = [2124799722];
+const BADGE_IDS = [2124799722, 2124841910, 2124841911];
 
 async function checkBadges() {
   const username = document.getElementById("username").value.trim();
@@ -11,7 +11,6 @@ async function checkBadges() {
 
   gridContainer.innerHTML = "<p>Loading...</p>";
 
-  // Step 1: Username -> User ID (using GET search instead of POST usernames/users)
 let userId;
 try {
   const userRes = await fetch(
@@ -25,7 +24,6 @@ try {
     gridContainer.innerHTML = "<p>User not found!</p>";
     return;
   }
-  // Find the exact match (search can return partial matches)
   const exact = userData.data.find(
     u => u.name.toLowerCase() === username.toLowerCase()
   );
@@ -54,10 +52,8 @@ try {
     }
   } catch (err) {
     console.error("Step 2 (thumbnails) failed:", err);
-    // Not fatal — continue with placeholder images
   }
 
-  // Step 3: Check ownership per badge
   const ownedBadges = new Set();
   for (const badgeId of BADGE_IDS) {
     try {
@@ -77,7 +73,6 @@ try {
     }
   }
 
-  // Step 4: Render
   gridContainer.innerHTML = "";
   BADGE_IDS.forEach(badgeId => {
     const isOwned = ownedBadges.has(badgeId);
