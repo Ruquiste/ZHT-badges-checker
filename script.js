@@ -11,12 +11,28 @@ async function checkBadges() {
 
   gridContainer.innerHTML = "<p>Loading...</p>";
 
+  // Step 1
 let userId;
 try {
-  const userRes = await fetch(
-    `https://users.roproxy.com/v1/users/search?keyword=${encodeURIComponent(username)}&limit=10`
-  );
+  const userRes = await fetch("https://users.roproxy.com/v1/usernames/users", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    },
+    body: JSON.stringify({
+      usernames: [username],
+      excludeBannedUsers: false
+    })
+  });
+
   console.log("Username lookup status:", userRes.status);
+
+  if (userRes.status === 429) {
+    gridContainer.innerHTML = "<p>Too many requests (Rate Limited)! Please wait a minute and try again.</p>";
+    return;
+  }
+
   const userData = await userRes.json();
   console.log("Username lookup data:", userData);
 
@@ -24,17 +40,15 @@ try {
     gridContainer.innerHTML = "<p>User not found!</p>";
     return;
   }
-  const exact = userData.data.find(
-    u => u.name.toLowerCase() === username.toLowerCase()
-  );
-  userId = (exact || userData.data[0]).id;
+  
+  userId = userData.data[0].id;
+  
 } catch (err) {
   console.error("Step 1 (username lookup) failed:", err);
   gridContainer.innerHTML = "<p>Error looking up username. Check console for details.</p>";
   return;
 }
 
-  // Step 2: Badge thumbnails
   let badgeImages = {};
   try {
     const badgeIdsParam = BADGE_IDS.join(",");
