@@ -107,6 +107,14 @@ body {
   gap: 64px;
 }
 
+/* each badge's bar + (optional) sub-box live inside this wrapper so the
+   list's 64px gap only ever appears *between* badges, never between a bar
+   and its own sub-box */
+.badge-unit {
+  display: flex;
+  flex-direction: column;
+}
+
 /* ---- the bar ---- */
 .badge-bar {
   position: relative;
