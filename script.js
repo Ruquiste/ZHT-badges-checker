@@ -455,14 +455,13 @@ async function checkBadges() {
   // Step 1: Username -> User ID
   let userId;
   try {
-    // We use RoProxy here because the custom worker likely fails on POST bodies and CORS preflights.
-    const userRes = await fetch("https://users.roproxy.com/v1/usernames/users", {
+    const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
+    const userRes = await fetch(`${WORKER}/?url=${target}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
     });
     
-    // Catch HTML error pages if the proxy is down, preventing JSON parsing crashes
     if (!userRes.ok) {
       throw new Error(`HTTP Error: ${userRes.status}`);
     }
