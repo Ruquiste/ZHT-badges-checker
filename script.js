@@ -432,25 +432,30 @@ async function preloadBadgeDetails() {
   const allBadges = flattenAllBadges();
   if (!allBadges.length) return;
 
-  // fetch all badge details without delay
-  const fetchPromises = allBadges.map(async (badge) => {
-    try {
-      const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
-      const infoRes = await fetch(`${WORKER}/?url=${target}`);
-      if (infoRes.ok) {
-        const infoData = await infoRes.json();
-        badgeDetailsCache.set(badge.id, {
-          description: infoData.description || "",
-          awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
-        });
-        refreshSubboxIfOpen(badge);
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < allBadges.length; i += BATCH_SIZE) {
+    const batch = allBadges.slice(i, i + BATCH_SIZE);
+    
+    await Promise.all(batch.map(async (badge) => {
+      try {
+        const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
+        const infoRes = await fetch(`${WORKER}/?url=${target}`);
+        if (infoRes.ok) {
+          const infoData = await infoRes.json();
+          badgeDetailsCache.set(badge.id, {
+            description: infoData.description || "",
+            awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
+          });
+          refreshSubboxIfOpen(badge);
+        }
+      } catch (err) {
+        console.error(`Badge info fetch failed for ${badge.id}:`, err);
       }
-    } catch (err) {
-      console.error(`Badge info fetch failed for ${badge.id}:`, err);
-    }
-  });
-
-  await Promise.all(fetchPromises);
+    }));
+    
+    await delay(100);
+  }
+  
   detailsLoaded = true;
 }
 
