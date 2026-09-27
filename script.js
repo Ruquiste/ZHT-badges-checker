@@ -428,30 +428,53 @@ async function preloadThumbnails() {
 
 let detailsLoaded = false;
 
+async function throttledMap(items, worker, { concurrency = 3, delayMs = 200 } = {}) {
+  let index = 0;
+  async function runner() {
+    while (index < items.length) {
+      const i = index++;
+      await worker(items[i], i);
+      await delay(delayMs);
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, runner));
+}
+
+async function fetchBadgeDetailWithRetry(badge, attempt = 0) {
+  try {
+    const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
+    const infoRes = await fetch(`${WORKER}/?url=${target}`);
+
+    if (infoRes.status === 429 || infoRes.status === 403) {
+      if (attempt < 4) {
+        await delay(500 * Math.pow(2, attempt)); // 500ms, 1s, 2s, 4s
+        return fetchBadgeDetailWithRetry(badge, attempt + 1);
+      }
+      console.warn(`Bỏ qua badge ${badge.id} sau nhiều lần bị ${infoRes.status}.`);
+      return;
+    }
+
+    if (infoRes.ok) {
+      const infoData = await infoRes.json();
+      badgeDetailsCache.set(badge.id, {
+        description: infoData.description || "",
+        awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
+      });
+      refreshSubboxIfOpen(badge);
+    }
+  } catch (err) {
+    console.error(`Badge info fetch failed for ${badge.id}:`, err);
+  }
+}
+
 async function preloadBadgeDetails() {
   const allBadges = flattenAllBadges();
   if (!allBadges.length) return;
 
-  // fetch all badge details without delay
-  const fetchPromises = allBadges.map(async (badge) => {
-    try {
-      const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
-      const infoRes = await fetch(`${WORKER}/?url=${target}`);
-      if (infoRes.ok) {
-        const infoData = await infoRes.json();
-        badgeDetailsCache.set(badge.id, {
-          description: infoData.description || "",
-          awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
-        });
-        refreshSubboxIfOpen(badge);
-      }
-    } catch (err) {
-      console.error(`Badge info fetch failed for ${badge.id}:`, err);
-    }
-  });
-
-  await Promise.all(fetchPromises);
+  setStatus("Loading badge details...");
+  await throttledMap(allBadges, fetchBadgeDetailWithRetry, { concurrency: 3, delayMs: 200 });
   detailsLoaded = true;
+  setStatus("");
 }
 
 async function checkBadges() {
@@ -520,56 +543,58 @@ try {
   const CHUNK_SIZE = 100; 
 
   for (let i = 0; i < allBadges.length; i += CHUNK_SIZE) {
-    const chunk = allBadges.slice(i, i + CHUNK_SIZE);
-    const badgeIdsCsv = chunk.map(b => b.id).join(',');
-    
-    setStatus(`Checking ownership... (${Math.min(i + CHUNK_SIZE, allBadges.length)}/${allBadges.length})`);
+  const chunk = allBadges.slice(i, i + CHUNK_SIZE);
+  const badgeIdsCsv = chunk.map(b => b.id).join(',');
 
+  setStatus(`Checking ownership... (${Math.min(i + CHUNK_SIZE, allBadges.length)}/${allBadges.length})`);
+
+  let checkData = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const target = encodeURIComponent(
         `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`
       );
       const checkRes = await fetch(`${WORKER}/?url=${target}`);
-      
-      if (checkRes.ok) {
-        const checkData = await checkRes.json();
-        
-        // Ép tất cả badgeId về String để tránh lỗi lệch kiểu dữ liệu (String vs Number)
-        const ownedIds = new Set((checkData.data || []).map(item => String(item.badgeId)));
 
-        // Dùng vòng lặp for...of thay cho forEach để áp dụng delay hiển thị từng badge
-        for (const badge of chunk) {
-          const owned = ownedIds.has(String(badge.id));
-          const entry = badgeRegistry.get(badge.id);
-          
-          if (entry) {
-            entry.owned = owned;
-            entry.barEl.classList.toggle("locked", !owned);
-            entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
-            entry.imgWrapEl.classList.toggle("wobble", owned);
-            refreshSubboxIfOpen(badge);
-          }
-
-          if (owned) {
-            obtainedCount++;
-          }
-
-          // Cập nhật tiến trình ngay sau mỗi badge được kiểm tra
-          updateProgressSummary(obtainedCount, allBadges.length);
-          updateRegionProgress();
-
-          // Tạo khoảng hoãn nhỏ (15ms) giữa từng badge để hiệu ứng hiển thị từng cái một
-          await delay(15); 
-        }
-      } else {
-        console.warn(`Roblox API returned status ${checkRes.status} for chunk index ${i}`);
+      if (checkRes.status === 429 || checkRes.status === 403) {
+        const backoff = 800 * Math.pow(2, attempt);
+        setStatus(`Bị giới hạn tốc độ, đợi ${(backoff / 1000).toFixed(1)}s rồi thử lại...`);
+        await delay(backoff);
+        continue;
       }
+
+      if (checkRes.ok) checkData = await checkRes.json();
+      else console.warn(`Roblox API returned status ${checkRes.status} for chunk index ${i}`);
+      break;
     } catch (err) {
       console.error(`Bulk ownership check failed for chunk starting at index ${i}:`, err);
+      break;
     }
-
-    await delay(100); 
   }
+
+  if (checkData) {
+    const ownedIds = new Set((checkData.data || []).map(item => String(item.badgeId)));
+    for (const badge of chunk) {
+      const owned = ownedIds.has(String(badge.id));
+      const entry = badgeRegistry.get(badge.id);
+      if (entry) {
+        entry.owned = owned;
+        entry.barEl.classList.toggle("locked", !owned);
+        entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
+        entry.imgWrapEl.classList.toggle("wobble", owned);
+        refreshSubboxIfOpen(badge);
+      }
+      if (owned) obtainedCount++;
+      updateProgressSummary(obtainedCount, allBadges.length);
+      updateRegionProgress();
+      await delay(15);
+    }
+  } else {
+    setStatus(`Không lấy được dữ liệu cho chunk ${i} sau nhiều lần thử — bỏ qua.`);
+  }
+
+  await delay(300); // tăng delay giữa các chunk lên chút cho an toàn
+}
 
   setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
 }
