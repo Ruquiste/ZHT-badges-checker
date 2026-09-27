@@ -20,14 +20,22 @@ function setStatus(text) {
   document.getElementById("status-line").textContent = text;
 }
 
+function updateProgressSummary(obtained, total) {
+  const pct = total ? Math.round((obtained / total) * 100) : 0;
+  document.getElementById("progress-summary").textContent =
+    `${obtained} / ${total} badges obtained (${pct}%)`;
+}
+
 // ---------- Building the bars (skeleton, shown immediately on page load) ----------
 
 function buildBar(badge) {
   const [r, g, b] = getDifficultyColor(badge.difficulty);
+  const darker = [r, g, b].map(c => Math.round(c * 0.55));
 
   const bar = document.createElement("div");
   bar.className = "badge-bar locked";
-  bar.style.borderColor = `rgba(${r}, ${g}, ${b}, 0.8)`;
+  bar.style.background = `rgba(${r}, ${g}, ${b}, 0.4)`;
+  bar.style.border = `4px solid rgb(${darker[0]}, ${darker[1]}, ${darker[2]})`;
   bar.dataset.badgeId = badge.id;
 
   const acronym = document.createElement("div");
@@ -36,10 +44,11 @@ function buildBar(badge) {
 
   const statusTag = document.createElement("div");
   statusTag.className = "status-tag";
-  statusTag.textContent = "LOCKED";
+  statusTag.textContent = "UNOBTAINED";
 
   const imgWrap = document.createElement("div");
   imgWrap.className = "badge-img-wrap";
+  imgWrap.style.animationDelay = `-${(Math.random() * 1.6).toFixed(2)}s`;
 
   const img = document.createElement("img");
   img.src = PLACEHOLDER_IMG;
@@ -52,7 +61,9 @@ function buildBar(badge) {
 
   bar.addEventListener("click", () => toggleSubbox(badge.id));
 
-  badgeRegistry.set(badge.id, { badge, barEl: bar, imgEl: img, statusTagEl: statusTag, subboxEl: null });
+  badgeRegistry.set(badge.id, {
+    badge, barEl: bar, imgEl: img, imgWrapEl: imgWrap, statusTagEl: statusTag, subboxEl: null
+  });
 
   return bar;
 }
@@ -87,12 +98,13 @@ function renderSkeleton() {
 
 function buildSubboxContent(badge) {
   const [r, g, b] = getDifficultyColor(badge.difficulty);
+  const darker = [r, g, b].map(c => Math.round(c * 0.55));
   const details = badgeDetailsCache.get(badge.id) || {};
 
   const box = document.createElement("div");
   box.className = "badge-subbox";
-  box.style.background = `rgba(${r}, ${g}, ${b}, 0.15)`;
-  box.style.borderColor = `rgba(${r}, ${g}, ${b}, 0.8)`;
+  box.style.background = `rgba(${r}, ${g}, ${b}, 0.4)`;
+  box.style.border = `4px solid rgb(${darker[0]}, ${darker[1]}, ${darker[2]})`;
 
   const rows = [];
   rows.push(["Full name", badge.fullName || "(not set)"]);
@@ -249,6 +261,9 @@ async function checkBadges() {
   }
 
   // Step 4: Ownership check per badge (rate-limited with a short delay)
+  let obtainedCount = 0;
+  updateProgressSummary(0, allBadges.length);
+
   for (let i = 0; i < allBadges.length; i++) {
     const badge = allBadges[i];
     setStatus(`Checking ownership... (${i + 1}/${allBadges.length})`);
@@ -263,7 +278,8 @@ async function checkBadges() {
         const entry = badgeRegistry.get(badge.id);
         if (entry) {
           entry.barEl.classList.toggle("locked", !owned);
-          entry.statusTagEl.textContent = owned ? "OWNED" : "LOCKED";
+          entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
+          entry.imgWrapEl.classList.toggle("wobble", owned);
           // if this bar's subbox is currently open, refresh it with the newly fetched data
           if (entry.subboxEl) {
             const fresh = buildSubboxContent(badge);
@@ -271,6 +287,8 @@ async function checkBadges() {
             entry.subboxEl = fresh;
           }
         }
+        if (owned) obtainedCount++;
+        updateProgressSummary(obtainedCount, allBadges.length);
       }
     } catch (err) {
       console.error(`Ownership check failed for badge ${badge.id}:`, err);
@@ -283,6 +301,7 @@ async function checkBadges() {
 
 document.addEventListener("DOMContentLoaded", () => {
   renderSkeleton();
+  updateProgressSummary(0, flattenAllBadges().length);
   preloadThumbnails();
   preloadBadgeDetails();
 });
