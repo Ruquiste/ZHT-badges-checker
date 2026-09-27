@@ -62,7 +62,7 @@ h1 { margin-bottom: 4px; }
 .badge-bar-list {
   display: flex;
   flex-direction: column;
-  gap: 44px;
+  gap: 64px;
 }
 
 /* ---- the bar ---- */
@@ -105,15 +105,16 @@ h1 { margin-bottom: 4px; }
   pointer-events: none;
 }
 
-/* image sits over the bar in a fixed-size box, poking above the top; object-fit
-   keeps whatever shape the source art is (square, banner, shield...) from ever
-   overflowing sideways */
+/* image sits over the bar in a fixed-size box, vertically centered on the bar
+   so it pokes out evenly above and below; object-fit keeps whatever shape the
+   source art is (square, banner, shield...) from overflowing sideways */
 .badge-bar .badge-img-wrap {
   position: absolute;
-  right: 10px;
-  bottom: 6px;
-  width: 110px;
-  height: 110px;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 140px;
+  height: 140px;
   z-index: 3;
   pointer-events: none;
 }
