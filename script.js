@@ -69,38 +69,153 @@ function buildBar(badge) {
   return bar;
 }
 
+// Map to track per-region counts and UI elements
+// regionKey -> { total, obtained, countEl, nameEl, originalName, listWrapperEl, innerListEl }
+const regionRegistry = new Map();
+
+// Wraps letters in <span> tags with staggered 0.75s animation delays
+function createRainbowText(text) {
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < text.length; i++) {
+    const span = document.createElement("span");
+    span.className = "rainbow-char";
+    span.textContent = text[i];
+    // Each consecutive letter shifts by 0.75s in the rainbow cycle
+    span.style.animationDelay = `${i * 0.75}s`;
+    frag.appendChild(span);
+  }
+  return frag;
+}
+
 function renderSkeleton() {
   const container = document.getElementById("channels-container");
   container.innerHTML = "";
+  regionRegistry.clear();
 
-  CHANNELS.forEach(worldEntry => {
+  CHANNELS.forEach((worldEntry, wIdx) => {
     const worldHeading = document.createElement("div");
     worldHeading.className = "world-heading";
     worldHeading.textContent = worldEntry.world;
     container.appendChild(worldHeading);
 
-    worldEntry.regions.forEach(region => {
-      if (!region.badges.length) return; // skip empty placeholder regions
+    worldEntry.regions.forEach((region, rIdx) => {
+      if (!region.badges.length) return; // skip empty regions
 
+      const regionKey = `${wIdx}-${rIdx}`;
+      const totalBadges = region.badges.length;
+
+      // 1. Region Header Bar
       const regionHeading = document.createElement("div");
       regionHeading.className = "region-heading";
-      regionHeading.textContent = region.name;
-      container.appendChild(regionHeading);
+
+      const titleContainer = document.createElement("div");
+      titleContainer.className = "region-title-container";
+
+      const arrow = document.createElement("span");
+      arrow.className = "region-arrow";
+      arrow.textContent = "▼";
+
+      const regionNameEl = document.createElement("span");
+      regionNameEl.className = "region-name";
+      regionNameEl.textContent = region.name;
+
+      titleContainer.appendChild(arrow);
+      titleContainer.appendChild(regionNameEl);
+
+      // 2. Region Counter Element
+      const countEl = document.createElement("span");
+      countEl.className = "region-count";
+      countEl.textContent = `0 / ${totalBadges}`;
+
+      regionHeading.appendChild(titleContainer);
+      regionHeading.appendChild(countEl);
+
+      // 3. Collapsible Wrapper & Badge List
+      const contentWrapper = document.createElement("div");
+      contentWrapper.className = "region-content";
 
       const list = document.createElement("div");
       list.className = "badge-bar-list";
+
       region.badges.forEach(badge => {
         const bar = buildBar(badge);
-        // wrap each bar in its own unit so the list's big inter-badge gap
-        // never lands between a bar and its own sub-box (they share this
-        // wrapper instead, flush against each other with zero spacing)
         const unit = document.createElement("div");
         unit.className = "badge-unit";
         unit.appendChild(bar);
         list.appendChild(unit);
       });
-      container.appendChild(list);
+
+      contentWrapper.appendChild(list);
+
+      // 4. Toggle Accordion Click Event
+      regionHeading.addEventListener("click", () => {
+        const isOpen = contentWrapper.classList.contains("open");
+        if (isOpen) {
+          // Collapse
+          contentWrapper.style.height = contentWrapper.scrollHeight + "px";
+          void contentWrapper.offsetHeight; // force reflow
+          contentWrapper.style.height = "0px";
+          contentWrapper.classList.remove("open");
+          arrow.classList.remove("open");
+        } else {
+          // Expand
+          contentWrapper.classList.add("open");
+          arrow.classList.add("open");
+          contentWrapper.style.height = contentWrapper.scrollHeight + "px";
+
+          // Set to 'auto' after transition so adding expanded subboxes won't clip content
+          const handleEnd = (e) => {
+            if (e.propertyName === "height" && contentWrapper.classList.contains("open")) {
+              contentWrapper.style.height = "auto";
+            }
+            contentWrapper.removeEventListener("transitionend", handleEnd);
+          };
+          contentWrapper.addEventListener("transitionend", handleEnd);
+        }
+      });
+
+      // Save region reference to state
+      regionRegistry.set(regionKey, {
+        total: totalBadges,
+        obtained: 0,
+        countEl,
+        nameEl: regionNameEl,
+        originalName: region.name,
+        badgeIds: region.badges.map(b => b.id)
+      });
+
+      container.appendChild(regionHeading);
+      container.appendChild(contentWrapper);
     });
+  });
+}
+
+// Function to update region progress counters & trigger rainbow animation
+function updateRegionProgress() {
+  regionRegistry.forEach((data) => {
+    let obtainedCount = 0;
+    data.badgeIds.forEach(id => {
+      const entry = badgeRegistry.get(id);
+      if (entry && entry.owned) obtainedCount++;
+    });
+
+    data.obtained = obtainedCount;
+    data.countEl.textContent = `${obtainedCount} / ${data.total}`;
+
+    // If 100% completed, apply ROYGBIV animated rainbow effect to the region title
+    if (obtainedCount === data.total && data.total > 0) {
+      if (!data.nameEl.classList.contains("completed")) {
+        data.nameEl.classList.add("completed");
+        data.nameEl.textContent = ""; // Clear plain text
+        data.nameEl.appendChild(createRainbowText(data.originalName));
+      }
+    } else {
+      // Revert if incomplete
+      if (data.nameEl.classList.contains("completed")) {
+        data.nameEl.classList.remove("completed");
+        data.nameEl.textContent = data.originalName;
+      }
+    }
   });
 }
 
