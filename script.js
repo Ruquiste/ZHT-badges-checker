@@ -144,6 +144,7 @@ async function preloadThumbnails() {
   const allBadges = flattenAllBadges();
   if (!allBadges.length) return;
 
+  setStatus("Loading badge images...");
   const badgeIds = allBadges.map(b => b.id);
   try {
     const target = encodeURIComponent(
@@ -158,8 +159,10 @@ async function preloadThumbnails() {
       });
     }
     thumbnailsLoaded = true;
+    setStatus("");
   } catch (err) {
     console.error("Thumbnail preload failed:", err);
+    setStatus("Couldn't preload badge images — check console for details.");
   }
 }
 
