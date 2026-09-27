@@ -2,59 +2,24 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Roblox Badge Tracker</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-      background-color: #f4f4f9;
-    }
-    .controls {
-      margin-bottom: 20px;
-    }
-    input, button {
-      padding: 10px;
-      font-size: 16px;
-    }
-    .badge-grid {
-      display: flex;
-      gap: 15px;
-      flex-wrap: wrap;
-    }
-
-    .badge-card {
-      width: 150px;
-      padding: 15px;
-      border-radius: 8px;
-      background-color: #e0e0e0;
-      border: 2px solid #ccc;
-      text-align: center;
-      transition: background-color 0.3s ease;
-    }
-
-    .badge-card.owned {
-      background-color: #a8f0a1;
-      border-color: #4caf50;
-    }
-    .badge-card img {
-      width: 100px;
-      height: 100px;
-      object-fit: cover;
-      margin-bottom: 10px;
-    }
-  </style>
+  <title>ZHT Badge Tracker</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-  <h1>Roblox Badge Tracker</h1>
+ 
+  <h1>ZHT Badge Tracke</h1>
+  <p class="subtitle">Click a bar to see full details. Click again to close it.</p>
+ 
   <div class="controls">
     <input type="text" id="username" placeholder="Enter Roblox Username">
     <button onclick="checkBadges()">Check Badges</button>
   </div>
-
-  <div class="badge-grid" id="badge-grid">
-  </div>
-
+  <div class="status-line" id="status-line"></div>
+ 
+  <div id="channels-container"></div>
+ 
+  <script src="badges-data.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
+ 
