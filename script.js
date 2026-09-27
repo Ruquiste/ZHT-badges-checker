@@ -24,6 +24,79 @@ function updateProgressSummary(obtained, total) {
     `${obtained} / ${total} badges obtained (${pct}%)`;
 }
 
+// --- throttling / retry helpers (fixes 403 spam) ---
+
+// Chạy nhiều tác vụ nhưng giới hạn số lượng chạy song song, có delay giữa mỗi lần bắt đầu
+async function throttledMap(items, worker, { concurrency = 1, delayMs = 400 } = {}) {
+  let index = 0;
+  async function runner() {
+    while (index < items.length) {
+      const i = index++;
+      await worker(items[i], i);
+      await delay(delayMs);
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, runner));
+}
+
+// Gọi fetch với retry + exponential backoff khi dính 403/429
+async function fetchWithBackoff(url, options, { maxAttempts = 6, baseDelay = 1000 } = {}) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, options);
+    } catch (err) {
+      // lỗi mạng — vẫn thử lại
+      if (attempt === maxAttempts - 1) throw err;
+      await delay(baseDelay * Math.pow(2, attempt));
+      continue;
+    }
+
+    if (res.status === 429 || res.status === 403) {
+      if (attempt === maxAttempts - 1) return res; // trả về response lỗi cuối cùng, để caller tự xử lý
+      const wait = baseDelay * Math.pow(2, attempt);
+      setStatus(`Bị giới hạn tốc độ (status ${res.status}), đợi ${(wait / 1000).toFixed(1)}s rồi thử lại...`);
+      await delay(wait);
+      continue;
+    }
+
+    return res;
+  }
+}
+
+// --- localStorage cache cho badge details (description, awardedCount) ---
+
+const DETAILS_CACHE_KEY = "badgeDetailsCacheV1";
+const DETAILS_CACHE_TTL = 1000 * 60 * 60 * 24; // 24 giờ
+
+function loadDetailsCacheFromStorage() {
+  try {
+    const raw = localStorage.getItem(DETAILS_CACHE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    const now = Date.now();
+    Object.entries(parsed).forEach(([id, entry]) => {
+      if (entry && entry.savedAt && now - entry.savedAt < DETAILS_CACHE_TTL) {
+        badgeDetailsCache.set(Number(id), entry.data);
+      }
+    });
+  } catch (err) {
+    console.warn("Không đọc được cache badge details:", err);
+  }
+}
+
+function saveDetailsCacheToStorage() {
+  try {
+    const obj = {};
+    badgeDetailsCache.forEach((data, id) => {
+      obj[id] = { data, savedAt: Date.now() };
+    });
+    localStorage.setItem(DETAILS_CACHE_KEY, JSON.stringify(obj));
+  } catch (err) {
+    console.warn("Không lưu được cache badge details:", err);
+  }
+}
+
 // --- bilding bars ---
 
 function buildBar(badge) {
@@ -143,39 +216,39 @@ function renderSkeleton() {
       contentWrapper.appendChild(list);
 
       // 4. toggle accordion click event
-regionHeading.addEventListener("click", () => {
-  const isOpen = contentWrapper.classList.contains("open");
-  
-  if (isOpen) {
-    // Collapse
-    contentWrapper.classList.add("animating");
-    contentWrapper.style.height = contentWrapper.scrollHeight + "px";
-    void contentWrapper.offsetHeight; // force reflow
-    contentWrapper.style.height = "0px";
-    contentWrapper.classList.remove("open");
-    arrow.classList.remove("open");
-    
-    contentWrapper.addEventListener("transitionend", function handler(e) {
-      if (e.propertyName === "height") {
-        contentWrapper.classList.remove("animating");
-        contentWrapper.removeEventListener("transitionend", handler);
-      }
-    });
-  } else {
-    // Expand region
-    contentWrapper.classList.add("open", "animating");
-    arrow.classList.add("open");
-    contentWrapper.style.height = contentWrapper.scrollHeight + "px";
+      regionHeading.addEventListener("click", () => {
+        const isOpen = contentWrapper.classList.contains("open");
 
-    contentWrapper.addEventListener("transitionend", function handler(e) {
-      if (e.propertyName === "height" && contentWrapper.classList.contains("open")) {
-        contentWrapper.style.height = "auto"; // set to auto so subboxes push lower content down!
-        contentWrapper.classList.remove("animating");
-        contentWrapper.removeEventListener("transitionend", handler);
-      }
-    });
-  }
-});
+        if (isOpen) {
+          // Collapse
+          contentWrapper.classList.add("animating");
+          contentWrapper.style.height = contentWrapper.scrollHeight + "px";
+          void contentWrapper.offsetHeight; // force reflow
+          contentWrapper.style.height = "0px";
+          contentWrapper.classList.remove("open");
+          arrow.classList.remove("open");
+
+          contentWrapper.addEventListener("transitionend", function handler(e) {
+            if (e.propertyName === "height") {
+              contentWrapper.classList.remove("animating");
+              contentWrapper.removeEventListener("transitionend", handler);
+            }
+          });
+        } else {
+          // Expand region
+          contentWrapper.classList.add("open", "animating");
+          arrow.classList.add("open");
+          contentWrapper.style.height = contentWrapper.scrollHeight + "px";
+
+          contentWrapper.addEventListener("transitionend", function handler(e) {
+            if (e.propertyName === "height" && contentWrapper.classList.contains("open")) {
+              contentWrapper.style.height = "auto"; // set to auto so subboxes push lower content down!
+              contentWrapper.classList.remove("animating");
+              contentWrapper.removeEventListener("transitionend", handler);
+            }
+          });
+        }
+      });
 
       regionRegistry.set(regionKey, {
         total: totalBadges,
@@ -273,7 +346,7 @@ function buildSubboxContent(badge, owned) {
 
   inner.appendChild(content);
   box.appendChild(inner);
-  
+
   return box;
 }
 
@@ -410,7 +483,12 @@ async function preloadThumbnails() {
     const target = encodeURIComponent(
       `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`
     );
-    const thumbRes = await fetch(`${WORKER}/?url=${target}`);
+    const thumbRes = await fetchWithBackoff(`${WORKER}/?url=${target}`);
+    if (!thumbRes || !thumbRes.ok) {
+      console.warn("Thumbnail preload returned non-ok status:", thumbRes && thumbRes.status);
+      setStatus("Không tải được ảnh badge (bị giới hạn tốc độ). Sẽ dùng ảnh mặc định.");
+      return;
+    }
     const thumbData = await thumbRes.json();
     if (thumbData.data) {
       thumbData.data.forEach(item => {
@@ -428,40 +506,28 @@ async function preloadThumbnails() {
 
 let detailsLoaded = false;
 
-async function throttledMap(items, worker, { concurrency = 3, delayMs = 200 } = {}) {
-  let index = 0;
-  async function runner() {
-    while (index < items.length) {
-      const i = index++;
-      await worker(items[i], i);
-      await delay(delayMs);
-    }
-  }
-  await Promise.all(Array.from({ length: concurrency }, runner));
-}
-
-async function fetchBadgeDetailWithRetry(badge, attempt = 0) {
+// fetch chi tiết 1 badge, có retry/backoff, ghi vào cache khi thành công
+async function fetchOneBadgeDetail(badge) {
   try {
     const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
-    const infoRes = await fetch(`${WORKER}/?url=${target}`);
+    const infoRes = await fetchWithBackoff(`${WORKER}/?url=${target}`, undefined, {
+      maxAttempts: 6,
+      baseDelay: 1000
+    });
 
-    if (infoRes.status === 429 || infoRes.status === 403) {
-      if (attempt < 4) {
-        await delay(500 * Math.pow(2, attempt)); // 500ms, 1s, 2s, 4s
-        return fetchBadgeDetailWithRetry(badge, attempt + 1);
-      }
-      console.warn(`Bỏ qua badge ${badge.id} sau nhiều lần bị ${infoRes.status}.`);
+    if (!infoRes) return;
+
+    if (!infoRes.ok) {
+      console.warn(`Badge info fetch for ${badge.id} vẫn thất bại sau nhiều lần thử (status ${infoRes.status}).`);
       return;
     }
 
-    if (infoRes.ok) {
-      const infoData = await infoRes.json();
-      badgeDetailsCache.set(badge.id, {
-        description: infoData.description || "",
-        awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
-      });
-      refreshSubboxIfOpen(badge);
-    }
+    const infoData = await infoRes.json();
+    badgeDetailsCache.set(badge.id, {
+      description: infoData.description || "",
+      awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
+    });
+    refreshSubboxIfOpen(badge);
   } catch (err) {
     console.error(`Badge info fetch failed for ${badge.id}:`, err);
   }
@@ -471,8 +537,22 @@ async function preloadBadgeDetails() {
   const allBadges = flattenAllBadges();
   if (!allBadges.length) return;
 
-  setStatus("Loading badge details...");
-  await throttledMap(allBadges, fetchBadgeDetailWithRetry, { concurrency: 3, delayMs: 200 });
+  // nạp cache đã lưu trước (nếu còn hạn) để đỡ phải gọi lại
+  loadDetailsCacheFromStorage();
+
+  const missing = allBadges.filter(b => !badgeDetailsCache.has(b.id));
+
+  if (!missing.length) {
+    detailsLoaded = true;
+    return;
+  }
+
+  setStatus(`Loading badge details... (${missing.length} badge chưa có cache)`);
+
+  // Quan trọng: concurrency thấp + delay giữa các request để tránh bị 403
+  await throttledMap(missing, fetchOneBadgeDetail, { concurrency: 1, delayMs: 500 });
+
+  saveDetailsCacheToStorage();
   detailsLoaded = true;
   setStatus("");
 }
@@ -487,41 +567,42 @@ async function checkBadges() {
   setStatus("Looking up username...");
 
   // Step 1: Username -> User ID
-let userId;
-try {
-  const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
-  
-  const userRes = await fetch(`${WORKER}/?url=${target}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
-  });
-  if (!userRes.ok) {
-    const errorText = await userRes.text();
-    console.error(`Roblox API Error ${userRes.status}:`, errorText);
-    
-    if (userRes.status === 429) {
-      setStatus("Roblox is rate-limiting requests. Please wait a minute and try again.");
-    } else {
-      setStatus(`Roblox API Error (${userRes.status}). Check console.`);
+  let userId;
+  try {
+    const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
+
+    const userRes = await fetchWithBackoff(`${WORKER}/?url=${target}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
+    });
+
+    if (!userRes || !userRes.ok) {
+      const status = userRes ? userRes.status : "network error";
+      console.error(`Roblox API Error ${status}`);
+      if (status === 429 || status === 403) {
+        setStatus("Roblox đang giới hạn tốc độ. Vui lòng đợi một lát rồi thử lại.");
+      } else {
+        setStatus(`Roblox API Error (${status}). Check console.`);
+      }
+      return;
     }
+
+    const userData = await userRes.json();
+
+    if (!userData.data || userData.data.length === 0) {
+      setStatus("User not found! Check your spelling.");
+      return;
+    }
+
+    userId = userData.data[0].id;
+
+  } catch (err) {
+    console.error("Username lookup failed:", err);
+    setStatus("Error looking up username. Check console for details.");
     return;
   }
 
-  const userData = await userRes.json();
-
-  if (!userData.data || userData.data.length === 0) {
-    setStatus("User not found! Check your spelling.");
-    return;
-  }
-  
-  userId = userData.data[0].id;
-  
-} catch (err) {
-  console.error("Username lookup failed:", err);
-  setStatus("Error looking up username. Check console for details.");
-  return;
-}
   const allBadges = flattenAllBadges();
 
   // Step 2: Thumbnails
@@ -532,69 +613,70 @@ try {
 
   // Step 3: Badge info (description + winners)
   if (!detailsLoaded) {
-    setStatus("Loading badge details...");
     await preloadBadgeDetails();
   }
 
-  // Step 4: Ownership check per badge
+  // Step 4: Ownership check per badge (chunked, with retry/backoff on 403/429)
   let obtainedCount = 0;
   updateProgressSummary(0, allBadges.length);
 
-  const CHUNK_SIZE = 100; 
+  const CHUNK_SIZE = 100;
 
   for (let i = 0; i < allBadges.length; i += CHUNK_SIZE) {
-  const chunk = allBadges.slice(i, i + CHUNK_SIZE);
-  const badgeIdsCsv = chunk.map(b => b.id).join(',');
+    const chunk = allBadges.slice(i, i + CHUNK_SIZE);
+    const badgeIdsCsv = chunk.map(b => b.id).join(',');
 
-  setStatus(`Checking ownership... (${Math.min(i + CHUNK_SIZE, allBadges.length)}/${allBadges.length})`);
+    setStatus(`Checking ownership... (${Math.min(i + CHUNK_SIZE, allBadges.length)}/${allBadges.length})`);
 
-  let checkData = null;
-  for (let attempt = 0; attempt < 5; attempt++) {
+    let checkData = null;
     try {
       const target = encodeURIComponent(
         `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`
       );
-      const checkRes = await fetch(`${WORKER}/?url=${target}`);
+      const checkRes = await fetchWithBackoff(`${WORKER}/?url=${target}`, undefined, {
+        maxAttempts: 6,
+        baseDelay: 1000
+      });
 
-      if (checkRes.status === 429 || checkRes.status === 403) {
-        const backoff = 800 * Math.pow(2, attempt);
-        setStatus(`Bị giới hạn tốc độ, đợi ${(backoff / 1000).toFixed(1)}s rồi thử lại...`);
-        await delay(backoff);
-        continue;
+      if (checkRes && checkRes.ok) {
+        checkData = await checkRes.json();
+      } else {
+        console.warn(`Roblox API vẫn trả lỗi (status ${checkRes && checkRes.status}) cho chunk bắt đầu tại index ${i} sau nhiều lần thử.`);
       }
-
-      if (checkRes.ok) checkData = await checkRes.json();
-      else console.warn(`Roblox API returned status ${checkRes.status} for chunk index ${i}`);
-      break;
     } catch (err) {
       console.error(`Bulk ownership check failed for chunk starting at index ${i}:`, err);
-      break;
     }
-  }
 
-  if (checkData) {
-    const ownedIds = new Set((checkData.data || []).map(item => String(item.badgeId)));
-    for (const badge of chunk) {
-      const owned = ownedIds.has(String(badge.id));
-      const entry = badgeRegistry.get(badge.id);
-      if (entry) {
-        entry.owned = owned;
-        entry.barEl.classList.toggle("locked", !owned);
-        entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
-        entry.imgWrapEl.classList.toggle("wobble", owned);
-        refreshSubboxIfOpen(badge);
+    if (checkData) {
+      const ownedIds = new Set((checkData.data || []).map(item => String(item.badgeId)));
+
+      for (const badge of chunk) {
+        const owned = ownedIds.has(String(badge.id));
+        const entry = badgeRegistry.get(badge.id);
+
+        if (entry) {
+          entry.owned = owned;
+          entry.barEl.classList.toggle("locked", !owned);
+          entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
+          entry.imgWrapEl.classList.toggle("wobble", owned);
+          refreshSubboxIfOpen(badge);
+        }
+
+        if (owned) obtainedCount++;
+
+        updateProgressSummary(obtainedCount, allBadges.length);
+        updateRegionProgress();
+
+        await delay(15);
       }
-      if (owned) obtainedCount++;
-      updateProgressSummary(obtainedCount, allBadges.length);
-      updateRegionProgress();
-      await delay(15);
+    } else {
+      setStatus(`Không lấy được dữ liệu cho phần ${i}-${i + chunk.length} sau nhiều lần thử — bỏ qua phần này.`);
+      await delay(500);
     }
-  } else {
-    setStatus(`Không lấy được dữ liệu cho chunk ${i} sau nhiều lần thử — bỏ qua.`);
-  }
 
-  await delay(300); // tăng delay giữa các chunk lên chút cho an toàn
-}
+    // delay giữa các chunk để tránh spam liên tục
+    await delay(400);
+  }
 
   setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
 }
