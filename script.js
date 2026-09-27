@@ -562,6 +562,7 @@ try {
   }
 
   setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
+}
 
 document.addEventListener("DOMContentLoaded", () => {
   renderSkeleton();
