@@ -544,6 +544,7 @@ async function checkBadges() {
         }
         if (owned) obtainedCount++;
         updateProgressSummary(obtainedCount, allBadges.length);
+        updateRegionProgress();
       }
     } catch (err) {
       console.error(`Ownership check failed for badge ${badge.id}:`, err);
