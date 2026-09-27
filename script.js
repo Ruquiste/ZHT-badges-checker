@@ -106,11 +106,15 @@ function renderSkeleton() {
 
 // ---------- Sub-box (expand/collapse on click) ----------
 //
-// The sub-box uses the CSS grid "0fr -> 1fr" technique to animate open/close.
-// This is the robust way to animate something to/from its natural (auto)
-// height: no JS height-measuring, no reflow hacks, and it can't get "stuck"
-// partway or snap on the first frame the way animating max-height by hand
-// tends to. See buildSubboxContent for the markup it relies on.
+// Animates an explicit pixel `height` on the INNER wrapper (measured via
+// scrollHeight), not max-height/grid-fr on the outer box. This is the most
+// reliable way to get a true 0 -> full -> 0 slide: scrollHeight always
+// reports the real content height even while clipped, and using a plain
+// "height" transition (with a forced reflow + a double requestAnimationFrame
+// before the first change) avoids both the "already looks open on the very
+// first frame" glitch and the "shrinks to some floor then instantly
+// disappears" glitch — both are symptoms of the browser never actually
+// registering the starting value before the transition begins.
 
 function addRow(container, label, value, strong) {
   const row = document.createElement("div");
@@ -131,8 +135,8 @@ function buildSubboxContent(badge, owned) {
   box.style.background = `rgba(${r}, ${g}, ${b}, 0.4)`;
   box.style.border = `4px solid rgb(${darker[0]}, ${darker[1]}, ${darker[2]})`;
 
-  // inner wrapper holds the actual content + vertical padding; this is what
-  // gets clipped down to nothing when the grid row track collapses to 0fr
+  // inner wrapper holds the actual content + vertical padding; its `height`
+  // (not the outer box's) is what gets animated between 0 and its natural size
   const inner = document.createElement("div");
   inner.className = "badge-subbox-inner";
 
@@ -184,25 +188,34 @@ function finishCloseImmediately(entry) {
 
 function openSubbox(entry) {
   const box = buildSubboxContent(entry.badge, entry.owned);
+  const inner = box.querySelector(".badge-subbox-inner");
+
+  inner.style.height = "0px";
+  inner.style.overflow = "hidden";
+  inner.style.transition = "height 0.32s ease";
+
   entry.barEl.insertAdjacentElement("afterend", box);
   entry.barEl.classList.add("expanded");
   entry.subboxEl = box;
   entry.animState = "opening";
 
-  // rows/separator start hidden, then fade+rise in a stagger once the box starts opening
-  const pieces = box.querySelectorAll(".row, .separator");
+  // rows/separator start hidden, then fade+rise in a stagger once it starts opening
+  const pieces = inner.querySelectorAll(".row, .separator");
   pieces.forEach(el => {
     el.style.opacity = "0";
     el.style.transform = "translateY(-6px)";
     el.style.transition = "opacity 0.28s ease, transform 0.28s ease";
   });
 
-  // wait two frames before adding "expanded" so the browser has definitely
-  // painted the collapsed (0fr) state first — otherwise the grid-row change
-  // can get coalesced with the insert and the box just appears already-open
+  // scrollHeight reports the true content height even while height:0 clips it,
+  // so we can read the target immediately — no need to un-collapse to measure.
+  // Two nested rAFs guarantee the 0px state has actually been painted once
+  // before we change it, which is what makes the transition play at all
+  // instead of the box just appearing already-expanded on frame one.
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      box.classList.add("expanded");
+      const target = inner.scrollHeight;
+      inner.style.height = target + "px";
       pieces.forEach((el, i) => {
         setTimeout(() => {
           el.style.opacity = "1";
@@ -212,12 +225,13 @@ function openSubbox(entry) {
     });
   });
 
-  box.addEventListener("transitionend", function handler(e) {
-    if (e.propertyName === "grid-template-rows") {
+  inner.addEventListener("transitionend", function handler(e) {
+    if (e.propertyName === "height") {
       if (entry.subboxEl === box && entry.animState === "opening") {
+        inner.style.height = "auto"; // let it breathe if content changes later (e.g. data refresh)
         entry.animState = "open";
       }
-      box.removeEventListener("transitionend", handler);
+      inner.removeEventListener("transitionend", handler);
     }
   });
 }
@@ -225,23 +239,31 @@ function openSubbox(entry) {
 function closeSubbox(entry) {
   const box = entry.subboxEl;
   if (!box) return;
+  const inner = box.querySelector(".badge-subbox-inner");
 
   entry.barEl.classList.remove("expanded");
   entry.animState = "closing";
 
-  const pieces = box.querySelectorAll(".row, .separator");
+  // lock in the current pixel height (scrollHeight is correct even if height
+  // is currently "auto") so we have a real starting point to animate down from
+  const currentHeight = inner.scrollHeight;
+  inner.style.height = currentHeight + "px";
+  void inner.offsetHeight; // force reflow so that starting height is committed
+  inner.style.transition = "height 0.28s ease";
+
+  const pieces = inner.querySelectorAll(".row, .separator");
   pieces.forEach(el => {
     el.style.transition = "opacity 0.15s ease";
     el.style.opacity = "0";
   });
 
-  // dropping "expanded" collapses the grid row track back to 0fr, which
-  // clips the inner wrapper (padding included) all the way down to nothing
-  box.classList.remove("expanded");
+  requestAnimationFrame(() => {
+    inner.style.height = "0px";
+  });
 
-  box.addEventListener("transitionend", function handler(e) {
-    if (e.propertyName === "grid-template-rows") {
-      box.removeEventListener("transitionend", handler);
+  inner.addEventListener("transitionend", function handler(e) {
+    if (e.propertyName === "height") {
+      inner.removeEventListener("transitionend", handler);
       if (entry.subboxEl === box) {
         box.remove();
         entry.subboxEl = null;
@@ -256,7 +278,7 @@ function refreshSubboxIfOpen(badge) {
   const entry = badgeRegistry.get(badge.id);
   if (entry && entry.subboxEl) {
     const fresh = buildSubboxContent(badge, entry.owned);
-    fresh.classList.add("expanded"); // stay open, no re-animation
+    fresh.querySelector(".badge-subbox-inner").style.height = "auto"; // stay open, no re-animation
     entry.subboxEl.replaceWith(fresh);
     entry.subboxEl = fresh;
   }
