@@ -331,7 +331,8 @@ async function preloadBadgeDetails() {
   const allBadges = flattenAllBadges();
   if (!allBadges.length) return;
 
-  for (const badge of allBadges) {
+  // Fetch all badge details concurrently without artificial delays
+  const fetchPromises = allBadges.map(async (badge) => {
     try {
       const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
       const infoRes = await fetch(`${WORKER}/?url=${target}`);
@@ -341,14 +342,14 @@ async function preloadBadgeDetails() {
           description: infoData.description || "",
           awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
         });
-        // if this bar's subbox happens to already be open, refresh it now that data arrived
         refreshSubboxIfOpen(badge);
       }
     } catch (err) {
       console.error(`Badge info fetch failed for ${badge.id}:`, err);
     }
-    await delay(150);
-  }
+  });
+
+  await Promise.all(fetchPromises);
   detailsLoaded = true;
 }
 
