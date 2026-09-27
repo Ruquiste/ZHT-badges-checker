@@ -519,36 +519,50 @@ async function checkBadges() {
     
     setStatus(`Checking ownership... (${Math.min(i + CHUNK_SIZE, allBadges.length)}/${allBadges.length})`);
 
-    try {
-      const rawUrl = `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`;
-      const checkRes = await fetch(`${PROXY_BASE}${encodeURIComponent(rawUrl)}`);
-      
-      if (checkRes.ok) {
-        const checkData = await checkRes.json();
-        const ownedIds = new Set(checkData.data.map(item => item.badgeId));
+    let success = false;
+    let retries = 3;
 
-        chunk.forEach(badge => {
-          const owned = ownedIds.has(badge.id);
-          const entry = badgeRegistry.get(badge.id);
-          
-          if (entry) {
-            entry.owned = owned;
-            entry.barEl.classList.toggle("locked", !owned);
-            entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
-            entry.imgWrapEl.classList.toggle("wobble", owned);
-            refreshSubboxIfOpen(badge);
-          }
-          if (owned) obtainedCount++;
-        });
+    while (!success && retries > 0) {
+      try {
+        const rawUrl = `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`;
+        const checkRes = await fetch(`${PROXY_BASE}${encodeURIComponent(rawUrl)}`);
+        
+        if (checkRes.ok) {
+          const checkData = await checkRes.json();
+          const ownedIds = new Set(checkData.data.map(item => item.badgeId));
 
-        updateProgressSummary(obtainedCount, allBadges.length);
-        updateRegionProgress();
+          chunk.forEach(badge => {
+            const owned = ownedIds.has(badge.id);
+            const entry = badgeRegistry.get(badge.id);
+            
+            if (entry) {
+              entry.owned = owned;
+              entry.barEl.classList.toggle("locked", !owned);
+              entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
+              entry.imgWrapEl.classList.toggle("wobble", owned);
+              refreshSubboxIfOpen(badge);
+            }
+            if (owned) obtainedCount++;
+          });
+
+          updateProgressSummary(obtainedCount, allBadges.length);
+          updateRegionProgress();
+          success = true;
+        } else if (checkRes.status === 429) {
+          setStatus(`Bị giới hạn tốc độ (Rate Limit)! Đang chờ 3 giây để thử lại...`);
+          await delay(3000);
+          retries--;
+        } else {
+          console.error(`Lỗi HTTP ${checkRes.status} tại chunk ${i}`);
+          break;
+        }
+      } catch (err) {
+        console.error(`Lỗi kết nối tại chunk ${i}:`, err);
+        break;
       }
-    } catch (err) {
-      console.error(`Bulk ownership check failed for chunk starting at index ${i}:`, err);
     }
 
-    await delay(100); 
+    await delay(500); 
   }
 
   setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
