@@ -20,7 +20,7 @@ function setStatus(text) {
   document.getElementById("status-line").textContent = text;
 }
 
-// ---------- Building the bars ----------
+// ---------- Building the bars (skeleton, shown immediately on page load) ----------
 
 function buildBar(badge) {
   const [r, g, b] = getDifficultyColor(badge.difficulty);
@@ -68,7 +68,7 @@ function renderSkeleton() {
     container.appendChild(worldHeading);
 
     worldEntry.regions.forEach(region => {
-      if (!region.badges.length) return;
+      if (!region.badges.length) return; // skip empty placeholder regions
 
       const regionHeading = document.createElement("div");
       regionHeading.className = "region-heading";
@@ -138,6 +138,31 @@ function flattenAllBadges() {
   return all;
 }
 
+let thumbnailsLoaded = false;
+
+async function preloadThumbnails() {
+  const allBadges = flattenAllBadges();
+  if (!allBadges.length) return;
+
+  const badgeIds = allBadges.map(b => b.id);
+  try {
+    const target = encodeURIComponent(
+      `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`
+    );
+    const thumbRes = await fetch(`${WORKER}/?url=${target}`);
+    const thumbData = await thumbRes.json();
+    if (thumbData.data) {
+      thumbData.data.forEach(item => {
+        const entry = badgeRegistry.get(item.targetId);
+        if (entry && item.imageUrl) entry.imgEl.src = item.imageUrl;
+      });
+    }
+    thumbnailsLoaded = true;
+  } catch (err) {
+    console.error("Thumbnail preload failed:", err);
+  }
+}
+
 async function checkBadges() {
   const username = document.getElementById("username").value.trim();
   if (!username) {
@@ -175,23 +200,10 @@ async function checkBadges() {
     return;
   }
 
-  // Step 2: Thumbnails (one batched call for every hard-coded badge)
-  setStatus("Loading badge images...");
-  const badgeIds = allBadges.map(b => b.id);
-  try {
-    const target = encodeURIComponent(
-      `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`
-    );
-    const thumbRes = await fetch(`${WORKER}/?url=${target}`);
-    const thumbData = await thumbRes.json();
-    if (thumbData.data) {
-      thumbData.data.forEach(item => {
-        const entry = badgeRegistry.get(item.targetId);
-        if (entry && item.imageUrl) entry.imgEl.src = item.imageUrl;
-      });
-    }
-  } catch (err) {
-    console.error("Thumbnail fetch failed:", err);
+  // Step 2: Thumbnails (skip if the preload on page load already got them)
+  if (!thumbnailsLoaded) {
+    setStatus("Loading badge images...");
+    await preloadThumbnails();
   }
 
   // Step 3: Badge info (description + all-time winners count)
@@ -246,4 +258,7 @@ async function checkBadges() {
   setStatus(`Done — checked ${allBadges.length} badges for ${username}.`);
 }
 
-document.addEventListener("DOMContentLoaded", renderSkeleton);
+document.addEventListener("DOMContentLoaded", () => {
+  renderSkeleton();
+  preloadThumbnails();
+});
