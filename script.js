@@ -473,8 +473,9 @@ async function checkBadges() {
     setStatus("Error looking up username. Check console for details.");
     return;
 
-    const allBadges = flattenAllBadges();
+    
   }
+  const allBadges = flattenAllBadges();
 
   // Step 2: Thumbnails
   if (!thumbnailsLoaded) {
