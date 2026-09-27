@@ -1,6 +1,6 @@
 const WORKER = "https://roblox-badge-proxy.nguyenksang19052006.workers.dev";
 
-// Neutral placeholder shown before a username has been checked / before thumbnails load
+// placeholder
 const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150">
      <rect width="150" height="150" rx="18" fill="#3a3d44"/>
@@ -8,10 +8,8 @@ const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
    </svg>`
 );
 
-// id -> { badge, barEl, imgEl, acronymEl, subboxEl (or null when closed), owned, animState }
 const badgeRegistry = new Map();
 
-// id -> { description, awardedCount } once fetched
 const badgeDetailsCache = new Map();
 
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -26,7 +24,7 @@ function updateProgressSummary(obtained, total) {
     `${obtained} / ${total} badges obtained (${pct}%)`;
 }
 
-// ---------- Building the bars (skeleton, shown immediately on page load) ----------
+// --- bilding bars ---
 
 function buildBar(badge) {
   const [r, g, b] = getDifficultyColor(badge.difficulty);
@@ -63,24 +61,20 @@ function buildBar(badge) {
 
   badgeRegistry.set(badge.id, {
     badge, barEl: bar, imgEl: img, imgWrapEl: imgWrap, statusTagEl: statusTag,
-    subboxEl: null, owned: false, animState: null // animState: null | "opening" | "open" | "closing"
+    subboxEl: null, owned: false, animState: null
   });
 
   return bar;
 }
 
-// Map to track per-region counts and UI elements
-// regionKey -> { total, obtained, countEl, nameEl, originalName, listWrapperEl, innerListEl }
 const regionRegistry = new Map();
 
-// Wraps letters in <span> tags with staggered 0.75s animation delays
 function createRainbowText(text) {
   const frag = document.createDocumentFragment();
   for (let i = 0; i < text.length; i++) {
     const span = document.createElement("span");
     span.className = "rainbow-char";
     span.textContent = text[i];
-    // Each consecutive letter shifts by 0.75s in the rainbow cycle
     span.style.animationDelay = `${i * 0.75}s`;
     frag.appendChild(span);
   }
@@ -99,12 +93,12 @@ function renderSkeleton() {
     container.appendChild(worldHeading);
 
     worldEntry.regions.forEach((region, rIdx) => {
-      if (!region.badges.length) return; // skip empty regions
+      if (!region.badges.length) return;
 
       const regionKey = `${wIdx}-${rIdx}`;
       const totalBadges = region.badges.length;
 
-      // 1. Region Header Bar
+      // 1. region header bar
       const regionHeading = document.createElement("div");
       regionHeading.className = "region-heading";
 
@@ -122,7 +116,7 @@ function renderSkeleton() {
       titleContainer.appendChild(arrow);
       titleContainer.appendChild(regionNameEl);
 
-      // 2. Region Counter Element
+      // 2. region counter element
       const countEl = document.createElement("span");
       countEl.className = "region-count";
       countEl.textContent = `0 / ${totalBadges}`;
@@ -130,7 +124,7 @@ function renderSkeleton() {
       regionHeading.appendChild(titleContainer);
       regionHeading.appendChild(countEl);
 
-      // 3. Collapsible Wrapper & Badge List
+      // 3. collapsible wrapper & badge list
       const contentWrapper = document.createElement("div");
       contentWrapper.className = "region-content";
 
@@ -147,23 +141,23 @@ function renderSkeleton() {
 
       contentWrapper.appendChild(list);
 
-      // 4. Toggle Accordion Click Event
+      // 4. toggle accordion click event
       regionHeading.addEventListener("click", () => {
         const isOpen = contentWrapper.classList.contains("open");
         if (isOpen) {
-          // Collapse
+          // collapse
           contentWrapper.style.height = contentWrapper.scrollHeight + "px";
           void contentWrapper.offsetHeight; // force reflow
           contentWrapper.style.height = "0px";
           contentWrapper.classList.remove("open");
           arrow.classList.remove("open");
         } else {
-          // Expand
+          // expand
           contentWrapper.classList.add("open");
           arrow.classList.add("open");
           contentWrapper.style.height = contentWrapper.scrollHeight + "px";
 
-          // Set to 'auto' after transition so adding expanded subboxes won't clip content
+          // set to auto after transition so adding expanded subboxes won't clip content
           const handleEnd = (e) => {
             if (e.propertyName === "height" && contentWrapper.classList.contains("open")) {
               contentWrapper.style.height = "auto";
@@ -174,7 +168,6 @@ function renderSkeleton() {
         }
       });
 
-      // Save region reference to state
       regionRegistry.set(regionKey, {
         total: totalBadges,
         obtained: 0,
@@ -190,7 +183,6 @@ function renderSkeleton() {
   });
 }
 
-// Function to update region progress counters & trigger rainbow animation
 function updateRegionProgress() {
   regionRegistry.forEach((data) => {
     let obtainedCount = 0;
@@ -202,15 +194,15 @@ function updateRegionProgress() {
     data.obtained = obtainedCount;
     data.countEl.textContent = `${obtainedCount} / ${data.total}`;
 
-    // If 100% completed, apply ROYGBIV animated rainbow effect to the region title
+    // roygbiv if 100%
     if (obtainedCount === data.total && data.total > 0) {
       if (!data.nameEl.classList.contains("completed")) {
         data.nameEl.classList.add("completed");
-        data.nameEl.textContent = ""; // Clear plain text
+        data.nameEl.textContent = "";
         data.nameEl.appendChild(createRainbowText(data.originalName));
       }
     } else {
-      // Revert if incomplete
+      // revert if incomplete
       if (data.nameEl.classList.contains("completed")) {
         data.nameEl.classList.remove("completed");
         data.nameEl.textContent = data.originalName;
@@ -219,17 +211,7 @@ function updateRegionProgress() {
   });
 }
 
-// ---------- Sub-box (expand/collapse on click) ----------
-//
-// Animates an explicit pixel `height` on the INNER wrapper (measured via
-// scrollHeight), not max-height/grid-fr on the outer box. This is the most
-// reliable way to get a true 0 -> full -> 0 slide: scrollHeight always
-// reports the real content height even while clipped, and using a plain
-// "height" transition (with a forced reflow + a double requestAnimationFrame
-// before the first change) avoids both the "already looks open on the very
-// first frame" glitch and the "shrinks to some floor then instantly
-// disappears" glitch — both are symptoms of the browser never actually
-// registering the starting value before the transition begins.
+// --- subboxes something ---
 
 function addRow(container, label, value, strong) {
   const row = document.createElement("div");
@@ -250,15 +232,12 @@ function buildSubboxContent(badge, owned) {
   box.style.background = `rgba(${r}, ${g}, ${b}, 0.4)`;
   box.style.border = `4px solid rgb(${darker[0]}, ${darker[1]}, ${darker[2]})`;
 
-  // This wrapper purely handles the 0px -> scrollHeight animation
   const inner = document.createElement("div");
   inner.className = "badge-subbox-inner";
 
-  // NEW: This wrapper purely handles the spacing/padding
   const content = document.createElement("div");
   content.className = "badge-subbox-content";
 
-  // CHANGE: Append all your rows to 'content' instead of 'inner'
   addRow(content, "Full name", badge.fullName || "(not set)", true);
   if (details.description) addRow(content, "Description", details.description, true);
   addRow(content, "Difficulty", badge.difficulty.toFixed(2), true);
@@ -273,7 +252,6 @@ function buildSubboxContent(badge, owned) {
     addRow(content, "Winners (all time)", details.awardedCount.toLocaleString());
   }
 
-  // Put the padded content inside the animated wrapper
   inner.appendChild(content);
   box.appendChild(inner);
   
@@ -287,9 +265,6 @@ function toggleSubbox(badgeId) {
   if (entry.animState === "opening" || entry.animState === "open") {
     closeSubbox(entry);
   } else if (entry.animState === "closing") {
-    // a click arrived mid-close: snap the old box away instantly instead of
-    // letting it linger, then open fresh — this is what was causing leftover
-    // boxes to pile up when toggling faster than the animation
     finishCloseImmediately(entry);
     openSubbox(entry);
   } else {
@@ -319,7 +294,6 @@ function openSubbox(entry) {
   entry.subboxEl = box;
   entry.animState = "opening";
 
-  // rows/separator start hidden, then fade+rise in a stagger once it starts opening
   const pieces = inner.querySelectorAll(".row, .separator");
   pieces.forEach(el => {
     el.style.opacity = "0";
@@ -327,11 +301,6 @@ function openSubbox(entry) {
     el.style.transition = "opacity 0.28s ease, transform 0.28s ease";
   });
 
-  // scrollHeight reports the true content height even while height:0 clips it,
-  // so we can read the target immediately — no need to un-collapse to measure.
-  // Two nested rAFs guarantee the 0px state has actually been painted once
-  // before we change it, which is what makes the transition play at all
-  // instead of the box just appearing already-expanded on frame one.
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       const target = inner.scrollHeight;
@@ -348,7 +317,7 @@ function openSubbox(entry) {
   inner.addEventListener("transitionend", function handler(e) {
     if (e.propertyName === "height") {
       if (entry.subboxEl === box && entry.animState === "opening") {
-        inner.style.height = "auto"; // let it breathe if content changes later (e.g. data refresh)
+        inner.style.height = "auto";
         entry.animState = "open";
       }
       inner.removeEventListener("transitionend", handler);
@@ -364,11 +333,9 @@ function closeSubbox(entry) {
   entry.barEl.classList.remove("expanded");
   entry.animState = "closing";
 
-  // lock in the current pixel height (scrollHeight is correct even if height
-  // is currently "auto") so we have a real starting point to animate down from
   const currentHeight = inner.scrollHeight;
   inner.style.height = currentHeight + "px";
-  void inner.offsetHeight; // force reflow so that starting height is committed
+  void inner.offsetHeight;
   inner.style.transition = "height 0.28s ease";
 
   const pieces = inner.querySelectorAll(".row, .separator");
@@ -393,7 +360,7 @@ function closeSubbox(entry) {
   });
 }
 
-// rebuild a subbox's content in place (no slide animation) when fresh data arrives
+// rebuild a subbox's content in place
 function refreshSubboxIfOpen(badge) {
   const entry = badgeRegistry.get(badge.id);
   if (entry && entry.subboxEl) {
@@ -404,7 +371,7 @@ function refreshSubboxIfOpen(badge) {
   }
 }
 
-// ---------- Fetching live data for a username ----------
+// --- fetching live data for a username ---
 
 function flattenAllBadges() {
   const all = [];
@@ -446,7 +413,7 @@ async function preloadBadgeDetails() {
   const allBadges = flattenAllBadges();
   if (!allBadges.length) return;
 
-  // Fetch all badge details concurrently without artificial delays
+  // fetch all badge details without delay
   const fetchPromises = allBadges.map(async (badge) => {
     try {
       const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
@@ -471,13 +438,7 @@ async function preloadBadgeDetails() {
 async function checkBadges() {
   const username = document.getElementById("username").value.trim();
   if (!username) {
-    alert("Please enter a username!");
-    return;
-  }
-
-  const allBadges = flattenAllBadges();
-  if (!allBadges.length) {
-    setStatus("No badges hard-coded yet — fill in badges-data.js first.");
+    alert("Please enter a username.");
     return;
   }
 
@@ -495,7 +456,7 @@ async function checkBadges() {
     const userData = await userRes.json();
 
     if (!userData.data || userData.data.length === 0) {
-      setStatus("User not found!");
+      setStatus("User not found.");
       return;
     }
     userId = userData.data[0].id;
@@ -505,20 +466,19 @@ async function checkBadges() {
     return;
   }
 
-  // Step 2: Thumbnails (skip if the preload on page load already got them)
+  // Step 2: Thumbnails
   if (!thumbnailsLoaded) {
     setStatus("Loading badge images...");
     await preloadThumbnails();
   }
 
-  // Step 3: Badge info (description + winners) — already preloaded on page load,
-  // but fetch now as a fallback if the preload somehow hasn't finished/failed
+  // Step 3: Badge info (description + winners)
   if (!detailsLoaded) {
     setStatus("Loading badge details...");
     await preloadBadgeDetails();
   }
 
-  // Step 4: Ownership check per badge (rate-limited with a short delay)
+  // Step 4: Ownership check per badge
   let obtainedCount = 0;
   updateProgressSummary(0, allBadges.length);
 
@@ -539,7 +499,6 @@ async function checkBadges() {
           entry.barEl.classList.toggle("locked", !owned);
           entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
           entry.imgWrapEl.classList.toggle("wobble", owned);
-          // if this bar's subbox is currently open, refresh it with the newly fetched data
           refreshSubboxIfOpen(badge);
         }
         if (owned) obtainedCount++;
@@ -552,7 +511,7 @@ async function checkBadges() {
     await delay(400);
   }
 
-  setStatus(`Done — checked ${allBadges.length} badges for ${username}.`);
+  setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
