@@ -46,6 +46,13 @@ h1 { margin-bottom: 4px; }
   min-height: 20px;
 }
 
+.progress-summary {
+  font-size: 16px;
+  font-weight: 700;
+  color: #eee;
+  margin-bottom: 18px;
+}
+
 .world-heading {
   font-size: 22px;
   margin: 28px 0 12px;
@@ -72,9 +79,7 @@ h1 { margin-bottom: 4px; }
   border-radius: 42px;
   overflow: visible;
   cursor: pointer;
-  background: #1c1f24;
-  border: 2px solid rgba(130,130,130,0.5);
-  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.15s ease;
+  transition: filter 0.25s ease, transform 0.15s ease;
   display: flex;
   align-items: center;
 }
@@ -82,6 +87,29 @@ h1 { margin-bottom: 4px; }
 .badge-bar:active { transform: scale(0.995); }
 
 .badge-bar.locked { filter: grayscale(0.85) brightness(0.7); }
+
+/* moving diagonal stripes, sits above the color fill but below text/image */
+.badge-bar::before,
+.badge-subbox::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(0, 0, 0, 0.28) 0px, rgba(0, 0, 0, 0.28) 14px,
+    transparent 14px, transparent 28px
+  );
+  background-size: 200% 200%;
+  animation: stripe-move 2.4s linear infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@keyframes stripe-move {
+  from { background-position: 0 0; }
+  to   { background-position: 56px 56px; }
+}
 
 .badge-bar .acronym {
   position: relative;
@@ -126,15 +154,26 @@ h1 { margin-bottom: 4px; }
   display: block;
 }
 
+/* obtained badges gently wobble side to side; unobtained ones stay still */
+.badge-bar .badge-img-wrap.wobble {
+  animation: wobble 1.6s ease-in-out infinite;
+}
+
+@keyframes wobble {
+  0%   { transform: translateY(-50%) rotate(-10deg); }
+  50%  { transform: translateY(-50%) rotate(10deg); }
+  100% { transform: translateY(-50%) rotate(-10deg); }
+}
+
 /* ---- the sub-box ---- */
 .badge-subbox {
+  position: relative;
   border-radius: 16px;
   padding: 16px 22px;
   margin-top: -4px;
   font-size: 14px;
   line-height: 1.6;
-  background: rgba(130,130,130,0.12);
-  border: 1px solid rgba(130,130,130,0.5);
+  overflow: hidden;
   animation: reveal 0.18s ease;
 }
 
@@ -143,6 +182,10 @@ h1 { margin-bottom: 4px; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.badge-subbox .row { margin-bottom: 4px; }
+.badge-subbox .row {
+  position: relative;
+  z-index: 2;
+  margin-bottom: 4px;
+}
 .badge-subbox .row:last-child { margin-bottom: 0; }
 .badge-subbox .label { color: #c7cad1; font-weight: 600; margin-right: 6px; }
