@@ -96,6 +96,15 @@ function renderSkeleton() {
 
 // ---------- Sub-box (expand/collapse on click) ----------
 
+function addRow(box, label, value, strong) {
+  const row = document.createElement("div");
+  row.className = "row" + (strong ? " strong-row" : "");
+  row.innerHTML = `<span class="label">${label}:</span><span class="value"></span>`;
+  row.querySelector(".value").textContent = value;
+  box.appendChild(row);
+  return row;
+}
+
 function buildSubboxContent(badge) {
   const [r, g, b] = getDifficultyColor(badge.difficulty);
   const darker = [r, g, b].map(c => Math.round(c * 0.55));
@@ -106,23 +115,21 @@ function buildSubboxContent(badge) {
   box.style.background = `rgba(${r}, ${g}, ${b}, 0.4)`;
   box.style.border = `4px solid rgb(${darker[0]}, ${darker[1]}, ${darker[2]})`;
 
-  const rows = [];
-  rows.push(["Full name", badge.fullName || "(not set)"]);
-  if (details.description) rows.push(["Description", details.description]);
-  rows.push(["Difficulty", badge.difficulty.toFixed(2)]);
-  rows.push(["Length", badge.length || "(not set)"]);
-  rows.push(["Type", badge.type || "(not set)"]);
-  if (details.awardedCount !== undefined) {
-    rows.push(["Winners (all time)", details.awardedCount.toLocaleString()]);
-  }
+  // emphasized rows
+  addRow(box, "Full name", badge.fullName || "(not set)", true);
+  if (details.description) addRow(box, "Description", details.description, true);
+  addRow(box, "Difficulty", badge.difficulty.toFixed(2), true);
 
-  rows.forEach(([label, value]) => {
-    const row = document.createElement("div");
-    row.className = "row";
-    row.innerHTML = `<span class="label">${label}:</span><span class="value"></span>`;
-    row.querySelector(".value").textContent = value;
-    box.appendChild(row);
-  });
+  // separator between Difficulty and Length
+  const separator = document.createElement("div");
+  separator.className = "separator";
+  box.appendChild(separator);
+
+  addRow(box, "Length", badge.length || "(not set)");
+  addRow(box, "Type", badge.type || "(not set)");
+  if (details.awardedCount !== undefined) {
+    addRow(box, "Winners (all time)", details.awardedCount.toLocaleString());
+  }
 
   return box;
 }
@@ -132,14 +139,88 @@ function toggleSubbox(badgeId) {
   if (!entry) return;
 
   if (entry.subboxEl) {
-    entry.subboxEl.remove();
-    entry.subboxEl = null;
-    return;
+    closeSubbox(entry);
+  } else {
+    openSubbox(entry);
   }
+}
 
+function openSubbox(entry) {
   const box = buildSubboxContent(entry.badge);
+  box.style.maxHeight = "0px";
+  box.style.transition = "max-height 0.32s ease";
+
   entry.barEl.insertAdjacentElement("afterend", box);
+  entry.barEl.classList.add("expanded");
   entry.subboxEl = box;
+
+  // rows/separator start hidden, then fade+rise in a stagger once the box starts opening
+  const pieces = box.querySelectorAll(".row, .separator");
+  pieces.forEach(el => {
+    el.style.opacity = "0";
+    el.style.transform = "translateY(-6px)";
+    el.style.transition = "opacity 0.28s ease, transform 0.28s ease";
+  });
+
+  requestAnimationFrame(() => {
+    const target = box.scrollHeight;
+    box.style.maxHeight = target + "px";
+    pieces.forEach((el, i) => {
+      setTimeout(() => {
+        el.style.opacity = "1";
+        el.style.transform = "translateY(0)";
+      }, 90 + i * 45);
+    });
+  });
+
+  box.addEventListener("transitionend", function handler(e) {
+    if (e.propertyName === "max-height" && entry.subboxEl === box) {
+      box.style.maxHeight = "none"; // let it breathe if content changes later (e.g. data refresh)
+    }
+    box.removeEventListener("transitionend", handler);
+  });
+}
+
+function closeSubbox(entry) {
+  const box = entry.subboxEl;
+  if (!box) return;
+
+  entry.barEl.classList.remove("expanded");
+  entry.subboxEl = null;
+
+  // lock in the current pixel height so we can animate down to 0
+  const currentHeight = box.scrollHeight;
+  box.style.maxHeight = currentHeight + "px";
+  void box.offsetHeight; // force reflow so the browser registers the starting height
+  box.style.transition = "max-height 0.26s ease";
+
+  const pieces = box.querySelectorAll(".row, .separator");
+  pieces.forEach(el => {
+    el.style.transition = "opacity 0.15s ease";
+    el.style.opacity = "0";
+  });
+
+  requestAnimationFrame(() => {
+    box.style.maxHeight = "0px";
+  });
+
+  box.addEventListener("transitionend", function handler(e) {
+    if (e.propertyName === "max-height") {
+      box.remove();
+    }
+    box.removeEventListener("transitionend", handler);
+  });
+}
+
+// rebuild a subbox's content in place (no slide animation) when fresh data arrives
+function refreshSubboxIfOpen(badge) {
+  const entry = badgeRegistry.get(badge.id);
+  if (entry && entry.subboxEl) {
+    const fresh = buildSubboxContent(badge);
+    fresh.style.maxHeight = "none";
+    entry.subboxEl.replaceWith(fresh);
+    entry.subboxEl = fresh;
+  }
 }
 
 // ---------- Fetching live data for a username ----------
@@ -195,12 +276,7 @@ async function preloadBadgeDetails() {
           awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
         });
         // if this bar's subbox happens to already be open, refresh it now that data arrived
-        const entry = badgeRegistry.get(badge.id);
-        if (entry && entry.subboxEl) {
-          const fresh = buildSubboxContent(badge);
-          entry.subboxEl.replaceWith(fresh);
-          entry.subboxEl = fresh;
-        }
+        refreshSubboxIfOpen(badge);
       }
     } catch (err) {
       console.error(`Badge info fetch failed for ${badge.id}:`, err);
@@ -281,11 +357,7 @@ async function checkBadges() {
           entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
           entry.imgWrapEl.classList.toggle("wobble", owned);
           // if this bar's subbox is currently open, refresh it with the newly fetched data
-          if (entry.subboxEl) {
-            const fresh = buildSubboxContent(badge);
-            entry.subboxEl.replaceWith(fresh);
-            entry.subboxEl = fresh;
-          }
+          refreshSubboxIfOpen(badge);
         }
         if (owned) obtainedCount++;
         updateProgressSummary(obtainedCount, allBadges.length);
