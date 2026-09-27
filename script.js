@@ -24,6 +24,63 @@ function updateProgressSummary(obtained, total) {
     `${obtained} / ${total} badges obtained (${pct}%)`;
 }
 
+// --- networking helpers ---
+
+// Splits an array into chunks of at most `size` items. Used to stay under
+// Roblox's per-request ID caps on the batch endpoints (thumbnails,
+// awarded-dates), which otherwise silently truncate or fail on big lists.
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// fetch() wrapper that retries 429s (respecting Retry-After when present)
+// and 5xx/network errors with exponential backoff, instead of letting a
+// single transient failure silently look identical to "badge not owned".
+async function fetchWithRetry(url, options = {}, maxRetries = 4) {
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, options);
+    } catch (err) {
+      if (attempt >= maxRetries) throw err;
+      await delay(500 * 2 ** attempt);
+      continue;
+    }
+
+    if (res.status === 429) {
+      if (attempt >= maxRetries) throw new Error("429: rate limited after max retries");
+      const retryAfter = parseFloat(res.headers.get("Retry-After")) || 0;
+      await delay(Math.max(retryAfter * 1000, 700 * 2 ** attempt));
+      continue;
+    }
+
+    if (!res.ok && res.status >= 500) {
+      if (attempt >= maxRetries) return res; // give up, let caller handle non-ok
+      await delay(500 * 2 ** attempt);
+      continue;
+    }
+
+    return res;
+  }
+}
+
+// Runs `worker` over `items` with at most `concurrency` in flight at once.
+// Much faster than one-at-a-time-with-a-fixed-delay, but still bounded so
+// we don't slam the proxy/Roblox with hundreds of simultaneous requests.
+async function runPool(items, worker, concurrency = 4) {
+  let idx = 0;
+  async function next() {
+    while (idx < items.length) {
+      const i = idx++;
+      await worker(items[i], i);
+    }
+  }
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, next);
+  await Promise.all(workers);
+}
+
 // --- bilding bars ---
 
 function buildBar(badge) {
@@ -398,6 +455,8 @@ function flattenAllBadges() {
   return all;
 }
 
+const BATCH_SIZE = 50; // conservative cap for Roblox's batch endpoints
+
 let thumbnailsLoaded = false;
 
 async function preloadThumbnails() {
@@ -405,24 +464,34 @@ async function preloadThumbnails() {
   if (!allBadges.length) return;
 
   setStatus("Loading badge images...");
-  const badgeIds = allBadges.map(b => b.id);
-  try {
-    const target = encodeURIComponent(
-      `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`
-    );
-    const thumbRes = await fetch(`${WORKER}/?url=${target}`);
-    const thumbData = await thumbRes.json();
-    if (thumbData.data) {
-      thumbData.data.forEach(item => {
-        const entry = badgeRegistry.get(item.targetId);
-        if (entry && item.imageUrl) entry.imgEl.src = item.imageUrl;
-      });
+  const idChunks = chunk(allBadges.map(b => b.id), BATCH_SIZE);
+  let anyFailed = false;
+
+  await runPool(idChunks, async (idsChunk) => {
+    try {
+      const target = encodeURIComponent(
+        `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${idsChunk.join(",")}&size=150x150&format=Png`
+      );
+      const thumbRes = await fetchWithRetry(`${WORKER}/?url=${target}`);
+      if (!thumbRes.ok) throw new Error(`HTTP ${thumbRes.status}`);
+      const thumbData = await thumbRes.json();
+      if (thumbData.data) {
+        thumbData.data.forEach(item => {
+          const entry = badgeRegistry.get(item.targetId);
+          if (entry && item.imageUrl) entry.imgEl.src = item.imageUrl;
+        });
+      }
+    } catch (err) {
+      console.error("Thumbnail batch failed:", idsChunk, err);
+      anyFailed = true;
     }
+  }, 3);
+
+  if (anyFailed) {
+    setStatus("Some badge images failed to load — they'll retry next time you check a username.");
+  } else {
     thumbnailsLoaded = true;
     setStatus("");
-  } catch (err) {
-    console.error("Thumbnail preload failed:", err);
-    setStatus("Couldn't preload badge images — check console for details.");
   }
 }
 
@@ -432,26 +501,58 @@ async function preloadBadgeDetails() {
   const allBadges = flattenAllBadges();
   if (!allBadges.length) return;
 
-  // fetch all badge details without delay
-  const fetchPromises = allBadges.map(async (badge) => {
+  let anyFailed = false;
+
+  // bounded concurrency instead of firing every request at once —
+  // this alone was likely a big source of 429s
+  await runPool(allBadges, async (badge) => {
     try {
       const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
-      const infoRes = await fetch(`${WORKER}/?url=${target}`);
-      if (infoRes.ok) {
-        const infoData = await infoRes.json();
-        badgeDetailsCache.set(badge.id, {
-          description: infoData.description || "",
-          awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
-        });
-        refreshSubboxIfOpen(badge);
-      }
+      const infoRes = await fetchWithRetry(`${WORKER}/?url=${target}`);
+      if (!infoRes.ok) throw new Error(`HTTP ${infoRes.status}`);
+      const infoData = await infoRes.json();
+      badgeDetailsCache.set(badge.id, {
+        description: infoData.description || "",
+        awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
+      });
+      refreshSubboxIfOpen(badge);
     } catch (err) {
       console.error(`Badge info fetch failed for ${badge.id}:`, err);
+      anyFailed = true;
     }
-  });
+  }, 6);
 
-  await Promise.all(fetchPromises);
-  detailsLoaded = true;
+  detailsLoaded = !anyFailed;
+}
+
+// Batched ownership check: one request covers up to BATCH_SIZE badges via
+// the awarded-dates endpoint, instead of one request per badge with a
+// fixed delay between each. Failures are tracked (not silently treated as
+// "not owned") so the UI can show them as unknown rather than wrong.
+async function checkOwnership(userId, allBadges) {
+  const idChunks = chunk(allBadges.map(b => b.id), BATCH_SIZE);
+  const ownedIds = new Set();
+  const failedIds = new Set();
+  let done = 0;
+
+  await runPool(idChunks, async (idsChunk) => {
+    try {
+      const target = encodeURIComponent(
+        `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${idsChunk.join(",")}`
+      );
+      const res = await fetchWithRetry(`${WORKER}/?url=${target}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      (data.data || []).forEach(item => ownedIds.add(item.badgeId));
+    } catch (err) {
+      console.error("Ownership batch failed:", idsChunk, err);
+      idsChunk.forEach(id => failedIds.add(id));
+    }
+    done = Math.min(done + idsChunk.length, allBadges.length);
+    setStatus(`Checking ownership... (${done}/${allBadges.length})`);
+  }, 3);
+
+  return { ownedIds, failedIds };
 }
 
 async function checkBadges() {
@@ -464,46 +565,46 @@ async function checkBadges() {
   setStatus("Looking up username...");
 
   // Step 1: Username -> User ID
-let userId;
-try {
-  const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
-  
-  const userRes = await fetch(`${WORKER}/?url=${target}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
-  });
-  if (!userRes.ok) {
-    const errorText = await userRes.text();
-    console.error(`Roblox API Error ${userRes.status}:`, errorText);
-    
-    if (userRes.status === 429) {
-      setStatus("Roblox is rate-limiting requests. Please wait a minute and try again.");
-    } else {
-      setStatus(`Roblox API Error (${userRes.status}). Check console.`);
+  let userId;
+  try {
+    const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
+
+    const userRes = await fetchWithRetry(`${WORKER}/?url=${target}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
+    });
+    if (!userRes.ok) {
+      const errorText = await userRes.text();
+      console.error(`Roblox API Error ${userRes.status}:`, errorText);
+
+      if (userRes.status === 429) {
+        setStatus("Roblox is rate-limiting requests. Please wait a minute and try again.");
+      } else {
+        setStatus(`Roblox API Error (${userRes.status}). Check console.`);
+      }
+      return;
     }
+
+    const userData = await userRes.json();
+
+    if (!userData.data || userData.data.length === 0) {
+      setStatus("User not found! Check your spelling.");
+      return;
+    }
+
+    userId = userData.data[0].id;
+
+  } catch (err) {
+    console.error("Username lookup failed:", err);
+    setStatus("Error looking up username. Check console for details.");
     return;
   }
 
-  const userData = await userRes.json();
-
-  if (!userData.data || userData.data.length === 0) {
-    setStatus("User not found! Check your spelling.");
-    return;
-  }
-  
-  userId = userData.data[0].id;
-  
-} catch (err) {
-  console.error("Username lookup failed:", err);
-  setStatus("Error looking up username. Check console for details.");
-  return;
-}
   const allBadges = flattenAllBadges();
 
   // Step 2: Thumbnails
   if (!thumbnailsLoaded) {
-    setStatus("Loading badge images...");
     await preloadThumbnails();
   }
 
@@ -513,40 +614,38 @@ try {
     await preloadBadgeDetails();
   }
 
-  // Step 4: Ownership check per badge
-  let obtainedCount = 0;
+  // Step 4: Ownership check, batched
   updateProgressSummary(0, allBadges.length);
+  const { ownedIds, failedIds } = await checkOwnership(userId, allBadges);
 
-  for (let i = 0; i < allBadges.length; i++) {
-    const badge = allBadges[i];
-    setStatus(`Checking ownership... (${i + 1}/${allBadges.length})`);
-    try {
-      const target = encodeURIComponent(
-        `https://inventory.roblox.com/v1/users/${userId}/items/Badge/${badge.id}`
-      );
-      const checkRes = await fetch(`${WORKER}/?url=${target}`);
-      if (checkRes.ok) {
-        const checkData = await checkRes.json();
-        const owned = checkData && checkData.data && checkData.data.length > 0;
-        const entry = badgeRegistry.get(badge.id);
-        if (entry) {
-          entry.owned = owned;
-          entry.barEl.classList.toggle("locked", !owned);
-          entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
-          entry.imgWrapEl.classList.toggle("wobble", owned);
-          refreshSubboxIfOpen(badge);
-        }
-        if (owned) obtainedCount++;
-        updateProgressSummary(obtainedCount, allBadges.length);
-        updateRegionProgress();
-      }
-    } catch (err) {
-      console.error(`Ownership check failed for badge ${badge.id}:`, err);
+  let obtainedCount = 0;
+  allBadges.forEach(badge => {
+    const entry = badgeRegistry.get(badge.id);
+    if (!entry) return;
+
+    if (failedIds.has(badge.id)) {
+      // couldn't verify this one — say so instead of guessing "unobtained"
+      entry.statusTagEl.textContent = "?";
+      return;
     }
-    await delay(400);
-  }
 
-  setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
+    const owned = ownedIds.has(badge.id);
+    entry.owned = owned;
+    entry.barEl.classList.toggle("locked", !owned);
+    entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
+    entry.imgWrapEl.classList.toggle("wobble", owned);
+    refreshSubboxIfOpen(badge);
+    if (owned) obtainedCount++;
+  });
+
+  updateProgressSummary(obtainedCount, allBadges.length);
+  updateRegionProgress();
+
+  if (failedIds.size) {
+    setStatus(`Finished, but ${failedIds.size} badge(s) couldn't be verified — click Check again to retry.`);
+  } else {
+    setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
