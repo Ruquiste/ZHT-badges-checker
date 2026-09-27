@@ -10,17 +10,26 @@ body {
   font-size: 17px;
 }
 
-/* ---- header / brand ---- */
+/* ---- header / brand ----
+   logo + title are centered as a unit; the subtitle stays pinned to the
+   left edge of the full-width header */
 .header-brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.brand-center {
+  display: flex;
+  align-items: center;
+  gap: 18px;
 }
 
 .header-brand .logo {
-  width: 64px;
-  height: 64px;
+  width: 100px;
+  height: 100px;
   object-fit: contain;
   opacity: 0;
   transform: scale(0.3);
@@ -33,19 +42,18 @@ body {
   to   { opacity: 1; transform: scale(1); }
 }
 
-.header-brand .brand-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .header-brand .brand-title {
-  font-size: 30px;
+  font-size: 36px;
   font-weight: 700;
   line-height: 1.1;
 }
 
-.subtitle { color: #9a9ea6; margin: 0; font-size: 15px; }
+.subtitle {
+  align-self: flex-start;
+  color: #9a9ea6;
+  margin: 0;
+  font-size: 15px;
+}
 
 .controls {
   margin-bottom: 28px;
@@ -125,11 +133,16 @@ body {
   transition: filter 0.25s ease, transform 0.15s ease, border-radius 0.2s ease;
   display: flex;
   align-items: center;
+  /* flex items stack by z-index like positioned elements — this keeps the
+     bar (and the badge art overflowing out of it) painted above the
+     sub-box that follows it, instead of being covered by it */
+  z-index: 2;
 }
 
 .badge-bar:active { transform: scale(0.995); }
 
-.badge-bar.locked { filter: grayscale(0.85) brightness(0.7); }
+.badge-bar.locked,
+.badge-subbox.locked { filter: grayscale(0.85) brightness(0.7); }
 
 /* when its subbox is open, flatten the bottom edge so the two pieces look attached */
 .badge-bar.expanded {
@@ -225,19 +238,39 @@ body {
 
 /* ---- the sub-box ----
    Attached directly under the bar (no gap), flat top edge so it reads as
-   one continuous piece with the bar above it. Height is animated from JS
-   (max-height 0 -> scrollHeight) so it visually slides down/up out of the bar. */
+   one continuous piece with the bar above it.
+
+   Animation uses the CSS grid "0fr -> 1fr" trick: the box is a 1-row grid,
+   collapsed by default (0fr). Adding .expanded animates the row track to
+   1fr (its natural content height) via a normal CSS transition — no JS
+   height-measuring needed, and it can't snap on the first open or stall
+   partway on close the way hand-rolled max-height animations tend to.
+   The inner wrapper (padding included) is what actually gets clipped as
+   the row track shrinks, so it reaches a true 0 rather than stopping at
+   the padding's minimum size. */
 .badge-subbox {
   position: relative;
+  z-index: 1; /* sits below the bar so the bar's overflowing badge art stays visible */
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.32s ease;
   border-radius: 16px;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
   border-top: none;
-  padding: 16px 22px;
   margin-top: 0;
   font-size: 16px;
   line-height: 1.6;
+}
+
+.badge-subbox.expanded {
+  grid-template-rows: 1fr;
+}
+
+.badge-subbox-inner {
+  min-height: 0;
   overflow: hidden;
+  padding: 16px 22px;
 }
 
 .badge-subbox .row {
