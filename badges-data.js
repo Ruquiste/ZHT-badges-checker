@@ -42,8 +42,24 @@ const CHANNELS = [
           { acronym: "ToRQ",  id: 2148066240,        fullName: "Tower of Rage Quitting", difficulty: 9.76, length: "45+ minutes", type: "Tower" },
         ]
       },
-      { id: "region1b", name: "Region 1B - Nostalgic Realm", badges: [
-          // { acronym: "", id: 0, fullName: "", difficulty: 1.00, length: "", type: "" },
+      { id: "region1b", 
+       name: "Region 1B - Nostalgic Realm", 
+       badges: [
+          { acronym: "SoHLD", id: 3794968535578504,  fullName: "Steeple of Happy Lazy Days", difficulty: 1.20, length: "< 20 minutes", type: "Steeple" },
+          { acronym: "SoEC",  id: 672078790292046,   fullName: "Steeple of Easy Craziness", difficulty: 2.28, length: "< 20 minutes", type: "Steeple" },
+          { acronym: "ToJ",   id: 649330960853266,   fullName: "Tower of Jumping", difficulty: 2.48, length: "< 20 minutes", type: "Tower" },
+          { acronym: "ToSC",  id: 4347589745118123,  fullName: "Tower of Screen Chopping", difficulty: 3.01, length: "< 20 minutes", type: "Tower" },
+          { acronym: "SoDE",  id: 4256519703384997,  fullName: "Steeple of Dark End", difficulty: 3.53, length: "< 20 minutes", type: "Steeple" },
+          { acronym: "SoEM",  id: 2724214888498615,  fullName: "Steeple of Explosive Mayhem", difficulty: 4.20, length: "< 20 minutes", type: "Steeple" },
+          { acronym: "SoFC",  id: 1653367870482742,  fullName: "Steeple of Flipping Chairs", difficulty: 4.78, length: "< 20 minutes", type: "Steeple" },
+          { acronym: "SoHH",  id: 3291983064397201,  fullName: "Steeple of Harsh Harassments", difficulty: 5.53, length: "< 20 minutes", type: "Steeple" },
+          { acronym: "ToA",   id: 1328126418835075,  fullName: "Tower of Annoyances", difficulty: 5.59, length: "< 20 minutes", type: "Tower" },
+          { acronym: "SoCFM", id: 1333182703431424,  fullName: "Steeple of Crazy Frame Madness", difficulty: 6.34, length: "30+ minutes", type: "Steeple" },
+          { acronym: "ToUP",  id: 694820335237690,   fullName: "Tower of Unlimited Possibilities", difficulty: 6.58, length: "< 20 minutes", type: "Tower" },
+          { acronym: "CoMaM", id: 2182665953282071,  fullName: "Citadel of Mix and Match", difficulty: 7.33, length: "30+ minutes", type: "Citadel" },
+          { acronym: "SoSD",  id: 3282287603782711,  fullName: "Steeple of Slamo's Domain", difficulty: 7.72, length: "< 20 minutes", type: "Steeple" },
+          { acronym: "ToW",   id: 4362578170541138,  fullName: "Tower of Wretchedness", difficulty: 8.33, length: "30+ minutes", type: "Tower" },
+          { acronym: "SoI",   id: 1470185655236517,  fullName: "Steeple of Insanity", difficulty: 9.08, length: "< 20 minutes", type: "Steeple" },
       ] },
       { id: "region2", name: "Region 2 - Lapis Isle", badges: [
           // { acronym: "", id: 0, fullName: "", difficulty: 1.00, length: "", type: "" },
