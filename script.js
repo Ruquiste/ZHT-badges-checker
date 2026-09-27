@@ -1,4 +1,3 @@
-// Thay thế Cloudflare Worker bằng dịch vụ RoProxy công cộng
 const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150">
      <rect width="150" height="150" rx="18" fill="#3a3d44"/>
@@ -95,7 +94,6 @@ function renderSkeleton() {
       const regionKey = `${wIdx}-${rIdx}`;
       const totalBadges = region.badges.length;
 
-      // 1. region header bar
       const regionHeading = document.createElement("div");
       regionHeading.className = "region-heading";
       regionHeading.dataset.regionKey = regionKey;
@@ -114,7 +112,6 @@ function renderSkeleton() {
       titleContainer.appendChild(arrow);
       titleContainer.appendChild(regionNameEl);
 
-      // 2. region counter element
       const countEl = document.createElement("span");
       countEl.className = "region-count";
       countEl.textContent = `0 / ${totalBadges}`;
@@ -122,7 +119,6 @@ function renderSkeleton() {
       regionHeading.appendChild(titleContainer);
       regionHeading.appendChild(countEl);
 
-      // 3. collapsible wrapper & badge list
       const contentWrapper = document.createElement("div");
       contentWrapper.className = "region-content";
 
@@ -139,15 +135,13 @@ function renderSkeleton() {
 
       contentWrapper.appendChild(list);
 
-      // 4. toggle accordion click event
       regionHeading.addEventListener("click", () => {
         const isOpen = contentWrapper.classList.contains("open");
         
         if (isOpen) {
-          // Collapse
           contentWrapper.classList.add("animating");
           contentWrapper.style.height = contentWrapper.scrollHeight + "px";
-          void contentWrapper.offsetHeight; // force reflow
+          void contentWrapper.offsetHeight;
           contentWrapper.style.height = "0px";
           contentWrapper.classList.remove("open");
           arrow.classList.remove("open");
@@ -159,7 +153,6 @@ function renderSkeleton() {
             }
           });
         } else {
-          // Expand region
           contentWrapper.classList.add("open", "animating");
           arrow.classList.add("open");
           contentWrapper.style.height = contentWrapper.scrollHeight + "px";
@@ -401,9 +394,8 @@ async function preloadThumbnails() {
   setStatus("Loading badge images...");
   const badgeIds = allBadges.map(b => b.id);
   try {
-    // SỬA: Dùng trực tiếp RoProxy
-    const target = encodeURIComponent(`https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`);
-const thumbRes = await fetch(`https://corsproxy.io/?${target}`);
+    const rawUrl = `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`;
+    const thumbRes = await fetch(`https://corsproxy.io/?${encodeURIComponent(rawUrl)}`);
     const thumbData = await thumbRes.json();
     if (thumbData.data) {
       thumbData.data.forEach(item => {
@@ -431,9 +423,8 @@ async function preloadBadgeDetails() {
     
     await Promise.all(batch.map(async (badge) => {
       try {
-        // SỬA: Dùng trực tiếp RoProxy
-        const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
-const infoRes = await fetch(`https://corsproxy.io/?${target}`);
+        const rawUrl = `https://badges.roblox.com/v1/badges/${badge.id}`;
+        const infoRes = await fetch(`https://corsproxy.io/?${encodeURIComponent(rawUrl)}`);
         if (infoRes.ok) {
           const infoData = await infoRes.json();
           badgeDetailsCache.set(badge.id, {
@@ -465,13 +456,13 @@ async function checkBadges() {
   // Step 1: Username -> User ID
   let userId;
   try {
-    // Sửa dòng này:
-const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
-const userRes = await fetch(`https://corsproxy.io/?${target}`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
-});
+    const rawUrl = "https://users.roblox.com/v1/usernames/users";
+    
+    const userRes = await fetch(`https://corsproxy.io/?${encodeURIComponent(rawUrl)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
+    });
 
     if (!userRes.ok) {
       const errorText = await userRes.text();
@@ -527,8 +518,8 @@ const userRes = await fetch(`https://corsproxy.io/?${target}`, {
     setStatus(`Checking ownership... (${Math.min(i + CHUNK_SIZE, allBadges.length)}/${allBadges.length})`);
 
     try {
-      const target = encodeURIComponent(`https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`);
-const checkRes = await fetch(`https://corsproxy.io/?${target}`);
+      const rawUrl = `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`;
+      const checkRes = await fetch(`https://corsproxy.io/?${encodeURIComponent(rawUrl)}`);
       
       if (checkRes.ok) {
         const checkData = await checkRes.json();
