@@ -36,7 +36,7 @@ function buildBar(badge) {
 
   const statusTag = document.createElement("div");
   statusTag.className = "status-tag";
-  statusTag.textContent = "UNOBTAINED";
+  statusTag.textContent = "LOCKED";
 
   const imgWrap = document.createElement("div");
   imgWrap.className = "badge-img-wrap";
@@ -166,6 +166,38 @@ async function preloadThumbnails() {
   }
 }
 
+let detailsLoaded = false;
+
+async function preloadBadgeDetails() {
+  const allBadges = flattenAllBadges();
+  if (!allBadges.length) return;
+
+  for (const badge of allBadges) {
+    try {
+      const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
+      const infoRes = await fetch(`${WORKER}/?url=${target}`);
+      if (infoRes.ok) {
+        const infoData = await infoRes.json();
+        badgeDetailsCache.set(badge.id, {
+          description: infoData.description || "",
+          awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
+        });
+        // if this bar's subbox happens to already be open, refresh it now that data arrived
+        const entry = badgeRegistry.get(badge.id);
+        if (entry && entry.subboxEl) {
+          const fresh = buildSubboxContent(badge);
+          entry.subboxEl.replaceWith(fresh);
+          entry.subboxEl = fresh;
+        }
+      }
+    } catch (err) {
+      console.error(`Badge info fetch failed for ${badge.id}:`, err);
+    }
+    await delay(150);
+  }
+  detailsLoaded = true;
+}
+
 async function checkBadges() {
   const username = document.getElementById("username").value.trim();
   if (!username) {
@@ -209,23 +241,11 @@ async function checkBadges() {
     await preloadThumbnails();
   }
 
-  // Step 3: Badge info (description + all-time winners count)
-  setStatus("Loading badge details...");
-  for (const badge of allBadges) {
-    try {
-      const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
-      const infoRes = await fetch(`${WORKER}/?url=${target}`);
-      if (infoRes.ok) {
-        const infoData = await infoRes.json();
-        badgeDetailsCache.set(badge.id, {
-          description: infoData.description || "",
-          awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
-        });
-      }
-    } catch (err) {
-      console.error(`Badge info fetch failed for ${badge.id}:`, err);
-    }
-    await delay(150);
+  // Step 3: Badge info (description + winners) — already preloaded on page load,
+  // but fetch now as a fallback if the preload somehow hasn't finished/failed
+  if (!detailsLoaded) {
+    setStatus("Loading badge details...");
+    await preloadBadgeDetails();
   }
 
   // Step 4: Ownership check per badge (rate-limited with a short delay)
@@ -264,4 +284,5 @@ async function checkBadges() {
 document.addEventListener("DOMContentLoaded", () => {
   renderSkeleton();
   preloadThumbnails();
+  preloadBadgeDetails();
 });
