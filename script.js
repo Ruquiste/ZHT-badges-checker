@@ -1,3 +1,5 @@
+const PROXY_BASE = "https://roblox-badge-proxy.nguyenksang19052006.workers.dev/?url=";
+
 const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150">
      <rect width="150" height="150" rx="18" fill="#3a3d44"/>
@@ -395,7 +397,7 @@ async function preloadThumbnails() {
   const badgeIds = allBadges.map(b => b.id);
   try {
     const rawUrl = `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`;
-    const thumbRes = await fetch(`https://corsproxy.io/?${encodeURIComponent(rawUrl)}`);
+    const thumbRes = await fetch(`${PROXY_BASE}${encodeURIComponent(rawUrl)}`);
     const thumbData = await thumbRes.json();
     if (thumbData.data) {
       thumbData.data.forEach(item => {
@@ -424,7 +426,7 @@ async function preloadBadgeDetails() {
     await Promise.all(batch.map(async (badge) => {
       try {
         const rawUrl = `https://badges.roblox.com/v1/badges/${badge.id}`;
-        const infoRes = await fetch(`https://corsproxy.io/?${encodeURIComponent(rawUrl)}`);
+        const infoRes = await fetch(`${PROXY_BASE}${encodeURIComponent(rawUrl)}`);
         if (infoRes.ok) {
           const infoData = await infoRes.json();
           badgeDetailsCache.set(badge.id, {
@@ -458,7 +460,7 @@ async function checkBadges() {
   try {
     const rawUrl = "https://users.roblox.com/v1/usernames/users";
     
-    const userRes = await fetch(`https://corsproxy.io/?${encodeURIComponent(rawUrl)}`, {
+    const userRes = await fetch(`${PROXY_BASE}${encodeURIComponent(rawUrl)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
@@ -519,7 +521,7 @@ async function checkBadges() {
 
     try {
       const rawUrl = `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`;
-      const checkRes = await fetch(`https://corsproxy.io/?${encodeURIComponent(rawUrl)}`);
+      const checkRes = await fetch(`${PROXY_BASE}${encodeURIComponent(rawUrl)}`);
       
       if (checkRes.ok) {
         const checkData = await checkRes.json();
