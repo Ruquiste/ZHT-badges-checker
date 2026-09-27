@@ -405,3 +405,16 @@ body {
 .badge-unit:has(.badge-bar.expanded) {
   z-index: 10;
 }
+
+@keyframes green-ping {
+  0% {
+    background-color: rgba(76, 245, 130, 0.4);
+  }
+  100% {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.region-heading.ping-green {
+  animation: green-ping 0.8s ease-out;
+}
