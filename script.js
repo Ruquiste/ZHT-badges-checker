@@ -1,5 +1,6 @@
-const PROXY_BASE = "https://roblox-badge-proxy.nguyenksang19052006.workers.dev/?url=";
+const WORKER = "https://roblox-badge-proxy.nguyenksang19052006.workers.dev";
 
+// placeholder
 const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150">
      <rect width="150" height="150" rx="18" fill="#3a3d44"/>
@@ -193,6 +194,7 @@ function updateRegionProgress() {
     });
 
     const previousCount = data.obtained || 0;
+    // Nhấp nháy xanh lá cây khi có badge mới trong khu vực
     if (obtainedCount > previousCount) {
       const headingEl = document.querySelector(`[data-region-key="${regionKey}"]`);
       if (headingEl) {
@@ -379,7 +381,7 @@ function refreshSubboxIfOpen(badge) {
   }
 }
 
-// --- Fetching live data for a username ---
+// --- Fetching live data ---
 
 function flattenAllBadges() {
   const all = [];
@@ -396,8 +398,10 @@ async function preloadThumbnails() {
   setStatus("Loading badge images...");
   const badgeIds = allBadges.map(b => b.id);
   try {
-    const rawUrl = `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`;
-    const thumbRes = await fetch(`${PROXY_BASE}${encodeURIComponent(rawUrl)}`);
+    const target = encodeURIComponent(
+      `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`
+    );
+    const thumbRes = await fetch(`${WORKER}/?url=${target}`);
     const thumbData = await thumbRes.json();
     if (thumbData.data) {
       thumbData.data.forEach(item => {
@@ -425,8 +429,8 @@ async function preloadBadgeDetails() {
     
     await Promise.all(batch.map(async (badge) => {
       try {
-        const rawUrl = `https://badges.roblox.com/v1/badges/${badge.id}`;
-        const infoRes = await fetch(`${PROXY_BASE}${encodeURIComponent(rawUrl)}`);
+        const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
+        const infoRes = await fetch(`${WORKER}/?url=${target}`);
         if (infoRes.ok) {
           const infoData = await infoRes.json();
           badgeDetailsCache.set(badge.id, {
@@ -440,7 +444,7 @@ async function preloadBadgeDetails() {
       }
     }));
     
-    await delay(100);
+    await delay(200); // Giảm nhịp độ tải thông tin chi tiết
   }
   
   detailsLoaded = true;
@@ -458,14 +462,14 @@ async function checkBadges() {
   // Step 1: Username -> User ID
   let userId;
   try {
-    const rawUrl = "https://users.roblox.com/v1/usernames/users";
+    const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
     
-    const userRes = await fetch(`${PROXY_BASE}${encodeURIComponent(rawUrl)}`, {
+    const userRes = await fetch(`${WORKER}/?url=${target}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
     });
-
+    
     if (!userRes.ok) {
       const errorText = await userRes.text();
       console.error(`Roblox API Error ${userRes.status}:`, errorText);
@@ -501,13 +505,7 @@ async function checkBadges() {
     await preloadThumbnails();
   }
 
-  // Step 3: Badge info (description + winners)
-  if (!detailsLoaded) {
-    setStatus("Loading badge details...");
-    await preloadBadgeDetails();
-  }
-
-  // Step 4: Ownership check per badge
+  // Step 3: Ownership check per badge (Chạy chính, có Delay mượt & Auto-retry khi 429)
   let obtainedCount = 0;
   updateProgressSummary(0, allBadges.length);
 
@@ -519,17 +517,19 @@ async function checkBadges() {
     
     setStatus(`Checking ownership... (${Math.min(i + CHUNK_SIZE, allBadges.length)}/${allBadges.length})`);
 
-    let success = false;
+    let chunkSuccess = false;
     let retries = 3;
 
-    while (!success && retries > 0) {
+    while (!chunkSuccess && retries > 0) {
       try {
-        const rawUrl = `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`;
-        const checkRes = await fetch(`${PROXY_BASE}${encodeURIComponent(rawUrl)}`);
+        const target = encodeURIComponent(
+          `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`
+        );
+        const checkRes = await fetch(`${WORKER}/?url=${target}`);
         
         if (checkRes.ok) {
           const checkData = await checkRes.json();
-          const ownedIds = new Set(checkData.data.map(item => item.badgeId));
+          const ownedIds = new Set((checkData.data || []).map(item => item.badgeId));
 
           chunk.forEach(badge => {
             const owned = ownedIds.has(badge.id);
@@ -546,23 +546,30 @@ async function checkBadges() {
           });
 
           updateProgressSummary(obtainedCount, allBadges.length);
-          updateRegionProgress();
-          success = true;
+          updateRegionProgress(); // Cập nhật thanh tiến trình & kích hoạt hiệu ứng chớp xanh
+          chunkSuccess = true;
         } else if (checkRes.status === 429) {
-          setStatus(`Bị giới hạn tốc độ (Rate Limit)! Đang chờ 3 giây để thử lại...`);
+          setStatus(`Bị giới hạn tốc độ! Đang tạm dừng 3 giây rồi thử lại...`);
           await delay(3000);
           retries--;
         } else {
-          console.error(`Lỗi HTTP ${checkRes.status} tại chunk ${i}`);
+          console.error(`Lỗi HTTP ${checkRes.status} ở chunk ${i}`);
           break;
         }
       } catch (err) {
-        console.error(`Lỗi kết nối tại chunk ${i}:`, err);
+        console.error(`Lỗi mạng ở chunk ${i}:`, err);
         break;
       }
     }
 
-    await delay(500); 
+    // Delay 350ms giữa các đợt kiểm tra để tạo nhịp từ từ, tránh làm ngợp API Roblox
+    await delay(350); 
+  }
+
+  // Step 4: Tải chi tiết mô tả / lượt thắng ở nền sau khi đã kiểm tra xong huy hiệu
+  if (!detailsLoaded) {
+    setStatus("Loading badge extra details...");
+    preloadBadgeDetails(); // Chạy ngầm, không bắt người dùng đợi
   }
 
   setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
@@ -572,5 +579,4 @@ document.addEventListener("DOMContentLoaded", () => {
   renderSkeleton();
   updateProgressSummary(0, flattenAllBadges().length);
   preloadThumbnails();
-  preloadBadgeDetails();
 });
