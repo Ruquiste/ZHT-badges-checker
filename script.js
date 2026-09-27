@@ -517,37 +517,51 @@ try {
   let obtainedCount = 0;
   updateProgressSummary(0, allBadges.length);
 
-  for (let i = 0; i < allBadges.length; i++) {
-    const badge = allBadges[i];
-    setStatus(`Checking ownership... (${i + 1}/${allBadges.length})`);
+  const CHUNK_SIZE = 100; 
+  
+  for (let i = 0; i < allBadges.length; i += CHUNK_SIZE) {
+    const chunk = allBadges.slice(i, i + CHUNK_SIZE);
+    
+    const badgeIdsCsv = chunk.map(b => b.id).join(',');
+    
+    setStatus(`Checking ownership... (${Math.min(i + CHUNK_SIZE, allBadges.length)}/${allBadges.length})`);
+
     try {
       const target = encodeURIComponent(
-        `https://inventory.roblox.com/v1/users/${userId}/items/Badge/${badge.id}`
+        `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`
       );
       const checkRes = await fetch(`${WORKER}/?url=${target}`);
+      
       if (checkRes.ok) {
         const checkData = await checkRes.json();
-        const owned = checkData && checkData.data && checkData.data.length > 0;
-        const entry = badgeRegistry.get(badge.id);
-        if (entry) {
-          entry.owned = owned;
-          entry.barEl.classList.toggle("locked", !owned);
-          entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
-          entry.imgWrapEl.classList.toggle("wobble", owned);
-          refreshSubboxIfOpen(badge);
-        }
-        if (owned) obtainedCount++;
+        
+        const ownedIds = new Set(checkData.data.map(item => item.badgeId));
+
+        chunk.forEach(badge => {
+          const owned = ownedIds.has(badge.id);
+          const entry = badgeRegistry.get(badge.id);
+          
+          if (entry) {
+            entry.owned = owned;
+            entry.barEl.classList.toggle("locked", !owned);
+            entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
+            entry.imgWrapEl.classList.toggle("wobble", owned);
+            refreshSubboxIfOpen(badge);
+          }
+          if (owned) obtainedCount++;
+        });
+
         updateProgressSummary(obtainedCount, allBadges.length);
         updateRegionProgress();
       }
     } catch (err) {
-      console.error(`Ownership check failed for badge ${badge.id}:`, err);
+      console.error(`Bulk ownership check failed for chunk starting at index ${i}:`, err);
     }
-    await delay(400);
+
+    await delay(100); 
   }
 
   setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
-}
 
 document.addEventListener("DOMContentLoaded", () => {
   renderSkeleton();
