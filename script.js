@@ -135,28 +135,33 @@ function buildSubboxContent(badge, owned) {
   box.style.background = `rgba(${r}, ${g}, ${b}, 0.4)`;
   box.style.border = `4px solid rgb(${darker[0]}, ${darker[1]}, ${darker[2]})`;
 
-  // inner wrapper holds the actual content + vertical padding; its `height`
-  // (not the outer box's) is what gets animated between 0 and its natural size
+  // This wrapper purely handles the 0px -> scrollHeight animation
   const inner = document.createElement("div");
   inner.className = "badge-subbox-inner";
 
-  // emphasized rows
-  addRow(inner, "Full name", badge.fullName || "(not set)", true);
-  if (details.description) addRow(inner, "Description", details.description, true);
-  addRow(inner, "Difficulty", badge.difficulty.toFixed(2), true);
+  // NEW: This wrapper purely handles the spacing/padding
+  const content = document.createElement("div");
+  content.className = "badge-subbox-content";
 
-  // separator between Difficulty and Length
+  // CHANGE: Append all your rows to 'content' instead of 'inner'
+  addRow(content, "Full name", badge.fullName || "(not set)", true);
+  if (details.description) addRow(content, "Description", details.description, true);
+  addRow(content, "Difficulty", badge.difficulty.toFixed(2), true);
+
   const separator = document.createElement("div");
   separator.className = "separator";
-  inner.appendChild(separator);
+  content.appendChild(separator);
 
-  addRow(inner, "Length", badge.length || "(not set)");
-  addRow(inner, "Type", badge.type || "(not set)");
+  addRow(content, "Length", badge.length || "(not set)");
+  addRow(content, "Type", badge.type || "(not set)");
   if (details.awardedCount !== undefined) {
-    addRow(inner, "Winners (all time)", details.awardedCount.toLocaleString());
+    addRow(content, "Winners (all time)", details.awardedCount.toLocaleString());
   }
 
+  // Put the padded content inside the animated wrapper
+  inner.appendChild(content);
   box.appendChild(inner);
+  
   return box;
 }
 
