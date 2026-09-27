@@ -101,6 +101,7 @@ function renderSkeleton() {
       // 1. region header bar
       const regionHeading = document.createElement("div");
       regionHeading.className = "region-heading";
+      regionHeading.dataset.regionKey = regionKey;
 
       const titleContainer = document.createElement("div");
       titleContainer.className = "region-title-container";
@@ -192,12 +193,22 @@ regionHeading.addEventListener("click", () => {
 }
 
 function updateRegionProgress() {
-  regionRegistry.forEach((data) => {
+  regionRegistry.forEach((data, regionKey) => {
     let obtainedCount = 0;
     data.badgeIds.forEach(id => {
       const entry = badgeRegistry.get(id);
       if (entry && entry.owned) obtainedCount++;
     });
+
+    const previousCount = data.obtained || 0;
+    if (obtainedCount > previousCount) {
+      const headingEl = document.querySelector(`[data-region-key="${regionKey}"]`);
+      if (headingEl) {
+        headingEl.classList.remove("ping-green");
+        void headingEl.offsetWidth;
+        headingEl.classList.add("ping-green");
+      }
+    }
 
     data.obtained = obtainedCount;
     data.countEl.textContent = `${obtainedCount} / ${data.total}`;
