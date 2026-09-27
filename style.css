@@ -198,3 +198,24 @@ h1 { margin-bottom: 4px; }
 }
 .badge-subbox .row:last-child { margin-bottom: 0; }
 .badge-subbox .label { color: #c7cad1; font-weight: 600; margin-right: 6px; }
+
+.bg-video {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  min-width: 100%;
+  min-height: 100%;
+  width: auto;
+  height: auto;
+  transform: translate(-50%, -50%) scale(1.1);
+  object-fit: cover;
+  z-index: -2;
+  filter: blur(8px);
+}
+
+.bg-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 22, 26, 0.72);
+  z-index: -1;
+}
