@@ -308,3 +308,84 @@ body {
   border-top: 1px solid rgba(255, 255, 255, 0.2);
   margin: 10px 0;
 }
+
+/* ---- Region Accordion & Counter Styles ---- */
+
+.region-heading {
+  font-size: 18px;
+  color: #c7cad1;
+  margin: 20px 0 10px;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  transition: background 0.2s ease;
+}
+
+.region-heading:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.region-title-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.region-arrow {
+  display: inline-block;
+  font-size: 14px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.region-arrow.open {
+  transform: rotate(180deg);
+}
+
+.region-count {
+  font-size: 14px;
+  font-weight: 600;
+  color: #9a9ea6;
+}
+
+/* Container for collapsible badge list */
+.region-content {
+  overflow: hidden;
+  height: 0;
+  opacity: 0;
+  transition: height 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease;
+}
+
+.region-content.open {
+  opacity: 1;
+}
+
+/* Spacing workaround for collapsible region list */
+.region-content .badge-bar-list {
+  padding-top: 10px;
+  padding-bottom: 20px;
+}
+
+/* ---- ROYGBIV Rainbow Letter Animation ---- */
+
+/* ROYGBIV color sequence keyframes */
+@keyframes roygbiv-loop {
+  0%   { color: #ff0000; text-shadow: 0 0 8px rgba(255,0,0,0.6); }
+  14%  { color: #ff7f00; text-shadow: 0 0 8px rgba(255,127,0,0.6); }
+  28%  { color: #ffff00; text-shadow: 0 0 8px rgba(255,255,0,0.6); }
+  42%  { color: #00ff00; text-shadow: 0 0 8px rgba(0,255,0,0.6); }
+  57%  { color: #0000ff; text-shadow: 0 0 8px rgba(0,0,255,0.6); }
+  71%  { color: #4b0082; text-shadow: 0 0 8px rgba(75,0,130,0.6); }
+  85%  { color: #9400d3; text-shadow: 0 0 8px rgba(148,0,211,0.6); }
+  100% { color: #ff0000; text-shadow: 0 0 8px rgba(255,0,0,0.6); }
+}
+
+.rainbow-char {
+  display: inline-block;
+  animation: roygbiv-loop 5.25s infinite linear; /* 7 colors * 0.75s = 5.25s full cycle */
+  white-space: pre; /* preserves spaces between words */
+}
