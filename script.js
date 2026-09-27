@@ -401,7 +401,7 @@ async function checkBadges() {
     await delay(400);
   }
 
-  setStatus(`Done — checked ${allBadges.length} badges for ${username}.`);
+  setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
