@@ -62,7 +62,8 @@ function buildBar(badge) {
   bar.addEventListener("click", () => toggleSubbox(badge.id));
 
   badgeRegistry.set(badge.id, {
-    badge, barEl: bar, imgEl: img, imgWrapEl: imgWrap, statusTagEl: statusTag, subboxEl: null
+    badge, barEl: bar, imgEl: img, imgWrapEl: imgWrap, statusTagEl: statusTag,
+    subboxEl: null, animState: null // animState: null | "opening" | "open" | "closing"
   });
 
   return bar;
@@ -88,7 +89,16 @@ function renderSkeleton() {
 
       const list = document.createElement("div");
       list.className = "badge-bar-list";
-      region.badges.forEach(badge => list.appendChild(buildBar(badge)));
+      region.badges.forEach(badge => {
+        const bar = buildBar(badge);
+        // wrap each bar in its own unit so the list's big inter-badge gap
+        // never lands between a bar and its own sub-box (they share this
+        // wrapper instead, flush against each other with zero spacing)
+        const unit = document.createElement("div");
+        unit.className = "badge-unit";
+        unit.appendChild(bar);
+        list.appendChild(unit);
+      });
       container.appendChild(list);
     });
   });
@@ -138,11 +148,26 @@ function toggleSubbox(badgeId) {
   const entry = badgeRegistry.get(badgeId);
   if (!entry) return;
 
-  if (entry.subboxEl) {
+  if (entry.animState === "opening" || entry.animState === "open") {
     closeSubbox(entry);
+  } else if (entry.animState === "closing") {
+    // a click arrived mid-close: snap the old box away instantly instead of
+    // letting it linger, then open fresh — this is what was causing leftover
+    // boxes to pile up when toggling faster than the animation
+    finishCloseImmediately(entry);
+    openSubbox(entry);
   } else {
     openSubbox(entry);
   }
+}
+
+function finishCloseImmediately(entry) {
+  if (entry.subboxEl) {
+    entry.subboxEl.remove();
+    entry.subboxEl = null;
+  }
+  entry.animState = null;
+  entry.barEl.classList.remove("expanded");
 }
 
 function openSubbox(entry) {
@@ -153,6 +178,7 @@ function openSubbox(entry) {
   entry.barEl.insertAdjacentElement("afterend", box);
   entry.barEl.classList.add("expanded");
   entry.subboxEl = box;
+  entry.animState = "opening";
 
   // rows/separator start hidden, then fade+rise in a stagger once the box starts opening
   const pieces = box.querySelectorAll(".row, .separator");
@@ -174,10 +200,13 @@ function openSubbox(entry) {
   });
 
   box.addEventListener("transitionend", function handler(e) {
-    if (e.propertyName === "max-height" && entry.subboxEl === box) {
-      box.style.maxHeight = "none"; // let it breathe if content changes later (e.g. data refresh)
+    if (e.propertyName === "max-height") {
+      if (entry.subboxEl === box && entry.animState === "opening") {
+        box.style.maxHeight = "none"; // let it breathe if content changes later (e.g. data refresh)
+        entry.animState = "open";
+      }
+      box.removeEventListener("transitionend", handler);
     }
-    box.removeEventListener("transitionend", handler);
   });
 }
 
@@ -186,7 +215,7 @@ function closeSubbox(entry) {
   if (!box) return;
 
   entry.barEl.classList.remove("expanded");
-  entry.subboxEl = null;
+  entry.animState = "closing";
 
   // lock in the current pixel height so we can animate down to 0
   const currentHeight = box.scrollHeight;
@@ -206,9 +235,13 @@ function closeSubbox(entry) {
 
   box.addEventListener("transitionend", function handler(e) {
     if (e.propertyName === "max-height") {
-      box.remove();
+      box.removeEventListener("transitionend", handler);
+      if (entry.subboxEl === box) {
+        box.remove();
+        entry.subboxEl = null;
+        entry.animState = null;
+      }
     }
-    box.removeEventListener("transitionend", handler);
   });
 }
 
@@ -368,7 +401,7 @@ async function checkBadges() {
     await delay(400);
   }
 
-  setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
+  setStatus(`Done — checked ${allBadges.length} badges for ${username}.`);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
