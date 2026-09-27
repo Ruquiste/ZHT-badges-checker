@@ -70,7 +70,7 @@ h1 { margin-bottom: 4px; }
   position: relative;
   height: 84px;
   border-radius: 42px;
-  overflow: hidden;
+  overflow: visible;
   cursor: pointer;
   background: #1c1f24;
   border: 2px solid rgba(130,130,130,0.5);
@@ -105,17 +105,14 @@ h1 { margin-bottom: 4px; }
   pointer-events: none;
 }
 
-/* image sits behind the text, bottom-anchored, oversized, rotated, fading upward */
+/* image sits over the bar, bottom-anchored, oversized so it pokes above the top */
 .badge-bar .badge-img-wrap {
   position: absolute;
-  right: -10px;
+  right: 14px;
   bottom: 0;
-  height: 230%;
+  height: 170%;
   width: auto;
-  z-index: 1;
-  transform-origin: bottom right;
-  -webkit-mask-image: linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 92%);
-          mask-image: linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 92%);
+  z-index: 3;
   pointer-events: none;
 }
 
