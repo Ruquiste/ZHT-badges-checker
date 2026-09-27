@@ -525,32 +525,34 @@ async function preloadBadgeDetails() {
   detailsLoaded = !anyFailed;
 }
 
-// Batched ownership check: one request covers up to BATCH_SIZE badges via
-// the awarded-dates endpoint, instead of one request per badge with a
-// fixed delay between each. Failures are tracked (not silently treated as
-// "not owned") so the UI can show them as unknown rather than wrong.
+// Ownership check: there is no public, unauthenticated batch endpoint for
+// badge ownership (the awarded-dates endpoint requires a .ROBLOSECURITY
+// cookie, and the Open Cloud v2 inventory-items batch endpoint requires an
+// Open Cloud API key attached server-side in the Worker). So this stays
+// one request per badge via the public inventory endpoint — but run
+// through a concurrency pool with retries, instead of strictly sequential
+// requests with a fixed 400ms sleep between every one.
 async function checkOwnership(userId, allBadges) {
-  const idChunks = chunk(allBadges.map(b => b.id), BATCH_SIZE);
   const ownedIds = new Set();
   const failedIds = new Set();
   let done = 0;
 
-  await runPool(idChunks, async (idsChunk) => {
+  await runPool(allBadges, async (badge) => {
     try {
       const target = encodeURIComponent(
-        `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${idsChunk.join(",")}`
+        `https://inventory.roblox.com/v1/users/${userId}/items/Badge/${badge.id}`
       );
       const res = await fetchWithRetry(`${WORKER}/?url=${target}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      (data.data || []).forEach(item => ownedIds.add(item.badgeId));
+      if (data && data.data && data.data.length > 0) ownedIds.add(badge.id);
     } catch (err) {
-      console.error("Ownership batch failed:", idsChunk, err);
-      idsChunk.forEach(id => failedIds.add(id));
+      console.error(`Ownership check failed for badge ${badge.id}:`, err);
+      failedIds.add(badge.id);
     }
-    done = Math.min(done + idsChunk.length, allBadges.length);
+    done++;
     setStatus(`Checking ownership... (${done}/${allBadges.length})`);
-  }, 3);
+  }, 6); // in-flight requests — lower this if you still see 429s in console
 
   return { ownedIds, failedIds };
 }
