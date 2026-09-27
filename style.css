@@ -3,7 +3,7 @@
 body {
   font-family: 'Segoe UI', Arial, sans-serif;
   padding: 24px;
-  background-color: transparent; /* .bg-overlay behind everything handles the dim/tint now */
+  background-color: transparent;
   color: #eee;
   max-width: 900px;
   margin: 0 auto;
@@ -11,7 +11,6 @@ body {
   position: relative;
 }
 
-/* ---- looping blurred video background ---- */
 .bg-video {
   position: fixed;
   top: 50%;
@@ -20,7 +19,7 @@ body {
   min-height: 100%;
   width: auto;
   height: auto;
-  transform: translate(-50%, -50%) scale(1.15); /* scale hides the soft edge the blur leaves at the viewport border */
+  transform: translate(-50%, -50%) scale(1.15);
   object-fit: cover;
   z-index: -2;
   filter: blur(18px);
@@ -29,13 +28,10 @@ body {
 .bg-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(20, 22, 26, 0.72); /* keeps foreground content readable over the blurred video */
+  background: rgba(20, 22, 26, 0.72);
   z-index: -1;
 }
 
-/* ---- header / brand ----
-   logo + title are centered as a unit; the subtitle stays pinned to the
-   left edge of the full-width header */
 .header-brand {
   display: flex;
   flex-direction: column;
@@ -138,15 +134,11 @@ body {
   gap: 64px;
 }
 
-/* each badge's bar + (optional) sub-box live inside this wrapper so the
-   list's 64px gap only ever appears *between* badges, never between a bar
-   and its own sub-box */
 .badge-unit {
   display: flex;
   flex-direction: column;
 }
 
-/* ---- the bar ---- */
 .badge-bar {
   position: relative;
   height: 84px;
@@ -156,9 +148,6 @@ body {
   transition: filter 0.25s ease, transform 0.15s ease, border-radius 0.2s ease;
   display: flex;
   align-items: center;
-  /* flex items stack by z-index like positioned elements — this keeps the
-     bar (and the badge art overflowing out of it) painted above the
-     sub-box that follows it, instead of being covered by it */
   z-index: 2;
 }
 
@@ -167,7 +156,6 @@ body {
 .badge-bar.locked,
 .badge-subbox.locked { filter: grayscale(0.85) brightness(0.7); }
 
-/* when its subbox is open, flatten the bottom edge so the two pieces look attached */
 .badge-bar.expanded {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
@@ -180,7 +168,6 @@ body {
   inset: 0;
   border-radius: inherit;
 
-  /* Use a standard gradient configured to tile perfectly */
   background-image: linear-gradient(
     135deg,
     rgba(0, 0, 0, 0.28) 25%,
@@ -191,7 +178,6 @@ body {
     transparent 75%,
     transparent 100%
   );
-  /* Explicit square size guarantees edges align */
   background-size: 40px 40px;
 
   animation: stripe-move 2.4s linear infinite;
@@ -201,7 +187,6 @@ body {
 
 @keyframes stripe-move {
   from { background-position: 0 0; }
-  /* Shift by exactly one tile width */
   to   { background-position: 40px 0; }
 }
 
@@ -227,9 +212,6 @@ body {
   pointer-events: none;
 }
 
-/* image sits over the bar in a fixed-size box, vertically centered on the bar
-   so it pokes out evenly above and below; object-fit keeps whatever shape the
-   source art is (square, banner, shield...) from overflowing sideways */
 .badge-bar .badge-img-wrap {
   position: absolute;
   right: 6px;
@@ -248,7 +230,6 @@ body {
   display: block;
 }
 
-/* obtained badges gently wobble side to side; unobtained ones stay still */
 .badge-bar .badge-img-wrap.wobble {
   animation: wobble 1.6s ease-in-out infinite;
 }
@@ -259,14 +240,9 @@ body {
   100% { transform: translateY(-50%) rotate(-5deg); }
 }
 
-/* ---- the sub-box ----
-   Attached directly under the bar (no gap), flat top edge so it reads as
-   one continuous piece with the bar above it. The outer box just holds the
-   border/background/rounding; the actual open/close animation happens on
-   .badge-subbox-inner's `height`, driven from JS (see script.js). */
 .badge-subbox {
   position: relative;
-  z-index: 1; /* sits below the bar so the bar's overflowing badge art stays visible */
+  z-index: 1;
   overflow: hidden;
   border-radius: 16px;
   border-top-left-radius: 0;
@@ -293,14 +269,12 @@ body {
 .badge-subbox .row:last-child { margin-bottom: 0; }
 .badge-subbox .label { color: #c7cad1; font-weight: 600; margin-right: 6px; }
 
-/* Full Name, Description, Difficulty are emphasized */
 .badge-subbox .row.strong-row .label,
 .badge-subbox .row.strong-row .value {
   font-weight: 700;
   color: #fff;
 }
 
-/* divider between Difficulty and Length */
 .badge-subbox .separator {
   position: relative;
   z-index: 2;
@@ -308,8 +282,6 @@ body {
   border-top: 1px solid rgba(255, 255, 255, 0.2);
   margin: 10px 0;
 }
-
-/* ---- Region Accordion & Counter Styles ---- */
 
 .region-heading {
   font-size: 18px;
@@ -352,7 +324,6 @@ body {
   color: #9a9ea6;
 }
 
-/* Container for collapsible badge list */
 .region-content {
   overflow: hidden;
   height: 0;
@@ -364,15 +335,11 @@ body {
   opacity: 1;
 }
 
-/* Spacing workaround for collapsible region list */
 .region-content .badge-bar-list {
   padding-top: 10px;
   padding-bottom: 20px;
 }
 
-/* ---- ROYGBIV Rainbow Letter Animation ---- */
-
-/* ROYGBIV color sequence keyframes */
 @keyframes roygbiv-loop {
   0%   { color: #ff0000; text-shadow: 0 0 8px rgba(255,0,0,0.6); }
   14%  { color: #ff7f00; text-shadow: 0 0 8px rgba(255,127,0,0.6); }
@@ -386,6 +353,6 @@ body {
 
 .rainbow-char {
   display: inline-block;
-  animation: roygbiv-loop 5.25s infinite linear; /* 7 colors * 0.75s = 5.25s full cycle */
-  white-space: pre; /* preserves spaces between words */
+  animation: roygbiv-loop 5.25s infinite linear;
+  white-space: pre;
 }
