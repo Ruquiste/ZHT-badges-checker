@@ -1,4 +1,4 @@
-const WORKER = "https://roblox-badge-proxy.nguyenksang19052006.workers.dev";
+const WORKER = "https://roblox-badge-proxy.ruquiste.workers.dev";
 
 // placeholder
 const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
