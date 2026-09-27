@@ -7,10 +7,45 @@ body {
   color: #eee;
   max-width: 900px;
   margin: 0 auto;
+  font-size: 17px;
 }
 
-h1 { margin-bottom: 4px; }
-.subtitle { color: #9a9ea6; margin-top: 0; margin-bottom: 24px; font-size: 14px; }
+/* ---- header / brand ---- */
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.header-brand .logo {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  opacity: 0;
+  transform: scale(0.3);
+  animation: logo-appear 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  animation-delay: 0.15s;
+}
+
+@keyframes logo-appear {
+  from { opacity: 0; transform: scale(0.3); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.header-brand .brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.header-brand .brand-title {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.subtitle { color: #9a9ea6; margin: 0; font-size: 15px; }
 
 .controls {
   margin-bottom: 28px;
@@ -21,7 +56,7 @@ h1 { margin-bottom: 4px; }
 .controls input {
   flex: 1;
   padding: 10px 14px;
-  font-size: 16px;
+  font-size: 17px;
   border-radius: 8px;
   border: 1px solid #3a3d44;
   background: #1e2126;
@@ -30,7 +65,7 @@ h1 { margin-bottom: 4px; }
 
 .controls button {
   padding: 10px 20px;
-  font-size: 16px;
+  font-size: 17px;
   border-radius: 8px;
   border: none;
   background: #4c8bf5;
@@ -41,27 +76,27 @@ h1 { margin-bottom: 4px; }
 
 .status-line {
   color: #9a9ea6;
-  font-size: 14px;
+  font-size: 15px;
   margin-bottom: 16px;
   min-height: 20px;
 }
 
 .progress-summary {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   color: #eee;
   margin-bottom: 18px;
 }
 
 .world-heading {
-  font-size: 22px;
+  font-size: 24px;
   margin: 28px 0 12px;
   border-bottom: 1px solid #2a2d33;
   padding-bottom: 6px;
 }
 
 .region-heading {
-  font-size: 16px;
+  font-size: 18px;
   color: #c7cad1;
   margin: 20px 0 10px;
 }
@@ -79,7 +114,7 @@ h1 { margin-bottom: 4px; }
   border-radius: 42px;
   overflow: visible;
   cursor: pointer;
-  transition: filter 0.25s ease, transform 0.15s ease;
+  transition: filter 0.25s ease, transform 0.15s ease, border-radius 0.2s ease;
   display: flex;
   align-items: center;
 }
@@ -88,13 +123,19 @@ h1 { margin-bottom: 4px; }
 
 .badge-bar.locked { filter: grayscale(0.85) brightness(0.7); }
 
+/* when its subbox is open, flatten the bottom edge so the two pieces look attached */
+.badge-bar.expanded {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 .badge-bar::before,
 .badge-subbox::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  
+
   /* Use a standard gradient configured to tile perfectly */
   background-image: linear-gradient(
     135deg,
@@ -107,8 +148,8 @@ h1 { margin-bottom: 4px; }
     transparent 100%
   );
   /* Explicit square size guarantees edges align */
-  background-size: 40px 40px; 
-  
+  background-size: 40px 40px;
+
   animation: stripe-move 2.4s linear infinite;
   pointer-events: none;
   z-index: 1;
@@ -117,7 +158,7 @@ h1 { margin-bottom: 4px; }
 @keyframes stripe-move {
   from { background-position: 0 0; }
   /* Shift by exactly one tile width */
-  to   { background-position: 40px 0; } 
+  to   { background-position: 40px 0; }
 }
 
 .badge-bar .acronym {
@@ -125,7 +166,7 @@ h1 { margin-bottom: 4px; }
   z-index: 2;
   padding-left: 24px;
   font-weight: 700;
-  font-size: 18px;
+  font-size: 20px;
   letter-spacing: 0.5px;
   color: #fff;
   text-shadow: 0 1px 4px rgba(0,0,0,0.6);
@@ -136,7 +177,7 @@ h1 { margin-bottom: 4px; }
   position: relative;
   z-index: 2;
   margin-left: 10px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: rgba(255,255,255,0.55);
   pointer-events: none;
@@ -174,21 +215,21 @@ h1 { margin-bottom: 4px; }
   100% { transform: translateY(-50%) rotate(-5deg); }
 }
 
-/* ---- the sub-box ---- */
+/* ---- the sub-box ----
+   Attached directly under the bar (no gap), flat top edge so it reads as
+   one continuous piece with the bar above it. Height is animated from JS
+   (max-height 0 -> scrollHeight) so it visually slides down/up out of the bar. */
 .badge-subbox {
   position: relative;
   border-radius: 16px;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: none;
   padding: 16px 22px;
-  margin-top: -4px;
-  font-size: 14px;
+  margin-top: 0;
+  font-size: 16px;
   line-height: 1.6;
   overflow: hidden;
-  animation: reveal 0.18s ease;
-}
-
-@keyframes reveal {
-  from { opacity: 0; transform: translateY(-6px); }
-  to   { opacity: 1; transform: translateY(0); }
 }
 
 .badge-subbox .row {
@@ -199,23 +240,18 @@ h1 { margin-bottom: 4px; }
 .badge-subbox .row:last-child { margin-bottom: 0; }
 .badge-subbox .label { color: #c7cad1; font-weight: 600; margin-right: 6px; }
 
-.bg-video {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  min-width: 100%;
-  min-height: 100%;
-  width: auto;
-  height: auto;
-  transform: translate(-50%, -50%) scale(1.1);
-  object-fit: cover;
-  z-index: -2;
-  filter: blur(8px);
+/* Full Name, Description, Difficulty are emphasized */
+.badge-subbox .row.strong-row .label,
+.badge-subbox .row.strong-row .value {
+  font-weight: 700;
+  color: #fff;
 }
 
-.bg-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(20, 22, 26, 0.72);
-  z-index: -1;
+/* divider between Difficulty and Length */
+.badge-subbox .separator {
+  position: relative;
+  z-index: 2;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  margin: 10px 0;
 }
