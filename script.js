@@ -36,7 +36,7 @@ function buildBar(badge) {
 
   const statusTag = document.createElement("div");
   statusTag.className = "status-tag";
-  statusTag.textContent = "LOCKED";
+  statusTag.textContent = "UNOBTAINED";
 
   const imgWrap = document.createElement("div");
   imgWrap.className = "badge-img-wrap";
