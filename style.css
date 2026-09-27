@@ -100,7 +100,6 @@ h1 { margin-bottom: 4px; }
     rgba(0, 0, 0, 0.28) 0px, rgba(0, 0, 0, 0.28) 14px,
     transparent 14px, transparent 28px
   );
-  background-size: 200% 200%;
   animation: stripe-move 2.4s linear infinite;
   pointer-events: none;
   z-index: 1;
@@ -108,7 +107,7 @@ h1 { margin-bottom: 4px; }
 
 @keyframes stripe-move {
   from { background-position: 0 0; }
-  to   { background-position: 56px 56px; }
+  to   { background-position: 56px 0; }
 }
 
 .badge-bar .acronym {
@@ -160,9 +159,9 @@ h1 { margin-bottom: 4px; }
 }
 
 @keyframes wobble {
-  0%   { transform: translateY(-50%) rotate(-10deg); }
-  50%  { transform: translateY(-50%) rotate(10deg); }
-  100% { transform: translateY(-50%) rotate(-10deg); }
+  0% { transform: translateY(-50%) rotate(-5deg); }
+  50% { transform: translateY(-50%) rotate(5deg); }
+  100% { transform: translateY(-50%) rotate(-5deg); }
 }
 
 /* ---- the sub-box ---- */
