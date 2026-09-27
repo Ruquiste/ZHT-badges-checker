@@ -1,6 +1,5 @@
 const WORKER = "https://roblox-badge-proxy.nguyenksang19052006.workers.dev";
 
-// Neutral placeholder shown before a username has been checked / before thumbnails load
 const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150">
      <rect width="150" height="150" rx="18" fill="#3a3d44"/>
@@ -8,10 +7,8 @@ const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
    </svg>`
 );
 
-// id -> { badge, barEl, imgEl, acronymEl, subboxEl (or null when closed) }
 const badgeRegistry = new Map();
 
-// id -> { description, awardedCount } once fetched
 const badgeDetailsCache = new Map();
 
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -19,8 +16,6 @@ function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function setStatus(text) {
   document.getElementById("status-line").textContent = text;
 }
-
-// ---------- Building the bars (skeleton, shown immediately on page load) ----------
 
 function buildBar(badge) {
   const [r, g, b] = getDifficultyColor(badge.difficulty);
@@ -40,8 +35,6 @@ function buildBar(badge) {
 
   const imgWrap = document.createElement("div");
   imgWrap.className = "badge-img-wrap";
-  const angle = 10 + Math.random() * 20; // random 10-30 degrees, fixed once per bar
-  imgWrap.style.transform = `rotate(${angle}deg)`;
 
   const img = document.createElement("img");
   img.src = PLACEHOLDER_IMG;
@@ -70,7 +63,7 @@ function renderSkeleton() {
     container.appendChild(worldHeading);
 
     worldEntry.regions.forEach(region => {
-      if (!region.badges.length) return; // skip empty placeholder regions
+      if (!region.badges.length) return;
 
       const regionHeading = document.createElement("div");
       regionHeading.className = "region-heading";
@@ -84,8 +77,6 @@ function renderSkeleton() {
     });
   });
 }
-
-// ---------- Sub-box (expand/collapse on click) ----------
 
 function buildSubboxContent(badge) {
   const [r, g, b] = getDifficultyColor(badge.difficulty);
@@ -132,8 +123,6 @@ function toggleSubbox(badgeId) {
   entry.subboxEl = box;
 }
 
-// ---------- Fetching live data for a username ----------
-
 function flattenAllBadges() {
   const all = [];
   CHANNELS.forEach(w => w.regions.forEach(r => r.badges.forEach(b => all.push(b))));
@@ -155,7 +144,6 @@ async function checkBadges() {
 
   setStatus("Looking up username...");
 
-  // Step 1: Username -> User ID
   let userId;
   try {
     const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
@@ -177,7 +165,6 @@ async function checkBadges() {
     return;
   }
 
-  // Step 2: Thumbnails (one batched call for every hard-coded badge)
   setStatus("Loading badge images...");
   const badgeIds = allBadges.map(b => b.id);
   try {
@@ -196,7 +183,6 @@ async function checkBadges() {
     console.error("Thumbnail fetch failed:", err);
   }
 
-  // Step 3: Badge info (description + all-time winners count)
   setStatus("Loading badge details...");
   for (const badge of allBadges) {
     try {
@@ -215,7 +201,6 @@ async function checkBadges() {
     await delay(150);
   }
 
-  // Step 4: Ownership check per badge (rate-limited with a short delay)
   for (let i = 0; i < allBadges.length; i++) {
     const badge = allBadges[i];
     setStatus(`Checking ownership... (${i + 1}/${allBadges.length})`);
@@ -231,7 +216,6 @@ async function checkBadges() {
         if (entry) {
           entry.barEl.classList.toggle("locked", !owned);
           entry.statusTagEl.textContent = owned ? "OWNED" : "LOCKED";
-          // if this bar's subbox is currently open, refresh it with the newly fetched data
           if (entry.subboxEl) {
             const fresh = buildSubboxContent(badge);
             entry.subboxEl.replaceWith(fresh);
