@@ -8,7 +8,7 @@ const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
    </svg>`
 );
 
-// id -> { badge, barEl, imgEl, acronymEl, subboxEl (or null when closed) }
+// id -> { badge, barEl, imgEl, acronymEl, subboxEl (or null when closed), owned, animState }
 const badgeRegistry = new Map();
 
 // id -> { description, awardedCount } once fetched
@@ -63,7 +63,7 @@ function buildBar(badge) {
 
   badgeRegistry.set(badge.id, {
     badge, barEl: bar, imgEl: img, imgWrapEl: imgWrap, statusTagEl: statusTag,
-    subboxEl: null, animState: null // animState: null | "opening" | "open" | "closing"
+    subboxEl: null, owned: false, animState: null // animState: null | "opening" | "open" | "closing"
   });
 
   return bar;
@@ -105,42 +105,54 @@ function renderSkeleton() {
 }
 
 // ---------- Sub-box (expand/collapse on click) ----------
+//
+// The sub-box uses the CSS grid "0fr -> 1fr" technique to animate open/close.
+// This is the robust way to animate something to/from its natural (auto)
+// height: no JS height-measuring, no reflow hacks, and it can't get "stuck"
+// partway or snap on the first frame the way animating max-height by hand
+// tends to. See buildSubboxContent for the markup it relies on.
 
-function addRow(box, label, value, strong) {
+function addRow(container, label, value, strong) {
   const row = document.createElement("div");
   row.className = "row" + (strong ? " strong-row" : "");
   row.innerHTML = `<span class="label">${label}:</span><span class="value"></span>`;
   row.querySelector(".value").textContent = value;
-  box.appendChild(row);
+  container.appendChild(row);
   return row;
 }
 
-function buildSubboxContent(badge) {
+function buildSubboxContent(badge, owned) {
   const [r, g, b] = getDifficultyColor(badge.difficulty);
   const darker = [r, g, b].map(c => Math.round(c * 0.55));
   const details = badgeDetailsCache.get(badge.id) || {};
 
   const box = document.createElement("div");
-  box.className = "badge-subbox";
+  box.className = "badge-subbox" + (owned ? "" : " locked");
   box.style.background = `rgba(${r}, ${g}, ${b}, 0.4)`;
   box.style.border = `4px solid rgb(${darker[0]}, ${darker[1]}, ${darker[2]})`;
 
+  // inner wrapper holds the actual content + vertical padding; this is what
+  // gets clipped down to nothing when the grid row track collapses to 0fr
+  const inner = document.createElement("div");
+  inner.className = "badge-subbox-inner";
+
   // emphasized rows
-  addRow(box, "Full name", badge.fullName || "(not set)", true);
-  if (details.description) addRow(box, "Description", details.description, true);
-  addRow(box, "Difficulty", badge.difficulty.toFixed(2), true);
+  addRow(inner, "Full name", badge.fullName || "(not set)", true);
+  if (details.description) addRow(inner, "Description", details.description, true);
+  addRow(inner, "Difficulty", badge.difficulty.toFixed(2), true);
 
   // separator between Difficulty and Length
   const separator = document.createElement("div");
   separator.className = "separator";
-  box.appendChild(separator);
+  inner.appendChild(separator);
 
-  addRow(box, "Length", badge.length || "(not set)");
-  addRow(box, "Type", badge.type || "(not set)");
+  addRow(inner, "Length", badge.length || "(not set)");
+  addRow(inner, "Type", badge.type || "(not set)");
   if (details.awardedCount !== undefined) {
-    addRow(box, "Winners (all time)", details.awardedCount.toLocaleString());
+    addRow(inner, "Winners (all time)", details.awardedCount.toLocaleString());
   }
 
+  box.appendChild(inner);
   return box;
 }
 
@@ -171,10 +183,7 @@ function finishCloseImmediately(entry) {
 }
 
 function openSubbox(entry) {
-  const box = buildSubboxContent(entry.badge);
-  box.style.maxHeight = "0px";
-  box.style.transition = "max-height 0.32s ease";
-
+  const box = buildSubboxContent(entry.badge, entry.owned);
   entry.barEl.insertAdjacentElement("afterend", box);
   entry.barEl.classList.add("expanded");
   entry.subboxEl = box;
@@ -188,21 +197,24 @@ function openSubbox(entry) {
     el.style.transition = "opacity 0.28s ease, transform 0.28s ease";
   });
 
+  // wait two frames before adding "expanded" so the browser has definitely
+  // painted the collapsed (0fr) state first — otherwise the grid-row change
+  // can get coalesced with the insert and the box just appears already-open
   requestAnimationFrame(() => {
-    const target = box.scrollHeight;
-    box.style.maxHeight = target + "px";
-    pieces.forEach((el, i) => {
-      setTimeout(() => {
-        el.style.opacity = "1";
-        el.style.transform = "translateY(0)";
-      }, 90 + i * 45);
+    requestAnimationFrame(() => {
+      box.classList.add("expanded");
+      pieces.forEach((el, i) => {
+        setTimeout(() => {
+          el.style.opacity = "1";
+          el.style.transform = "translateY(0)";
+        }, 90 + i * 45);
+      });
     });
   });
 
   box.addEventListener("transitionend", function handler(e) {
-    if (e.propertyName === "max-height") {
+    if (e.propertyName === "grid-template-rows") {
       if (entry.subboxEl === box && entry.animState === "opening") {
-        box.style.maxHeight = "none"; // let it breathe if content changes later (e.g. data refresh)
         entry.animState = "open";
       }
       box.removeEventListener("transitionend", handler);
@@ -217,24 +229,18 @@ function closeSubbox(entry) {
   entry.barEl.classList.remove("expanded");
   entry.animState = "closing";
 
-  // lock in the current pixel height so we can animate down to 0
-  const currentHeight = box.scrollHeight;
-  box.style.maxHeight = currentHeight + "px";
-  void box.offsetHeight; // force reflow so the browser registers the starting height
-  box.style.transition = "max-height 0.26s ease";
-
   const pieces = box.querySelectorAll(".row, .separator");
   pieces.forEach(el => {
     el.style.transition = "opacity 0.15s ease";
     el.style.opacity = "0";
   });
 
-  requestAnimationFrame(() => {
-    box.style.maxHeight = "0px";
-  });
+  // dropping "expanded" collapses the grid row track back to 0fr, which
+  // clips the inner wrapper (padding included) all the way down to nothing
+  box.classList.remove("expanded");
 
   box.addEventListener("transitionend", function handler(e) {
-    if (e.propertyName === "max-height") {
+    if (e.propertyName === "grid-template-rows") {
       box.removeEventListener("transitionend", handler);
       if (entry.subboxEl === box) {
         box.remove();
@@ -249,8 +255,8 @@ function closeSubbox(entry) {
 function refreshSubboxIfOpen(badge) {
   const entry = badgeRegistry.get(badge.id);
   if (entry && entry.subboxEl) {
-    const fresh = buildSubboxContent(badge);
-    fresh.style.maxHeight = "none";
+    const fresh = buildSubboxContent(badge, entry.owned);
+    fresh.classList.add("expanded"); // stay open, no re-animation
     entry.subboxEl.replaceWith(fresh);
     entry.subboxEl = fresh;
   }
@@ -386,6 +392,7 @@ async function checkBadges() {
         const owned = checkData && checkData.data && checkData.data.length > 0;
         const entry = badgeRegistry.get(badge.id);
         if (entry) {
+          entry.owned = owned;
           entry.barEl.classList.toggle("locked", !owned);
           entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
           entry.imgWrapEl.classList.toggle("wobble", owned);
@@ -401,7 +408,7 @@ async function checkBadges() {
     await delay(400);
   }
 
-  setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
+  setStatus(`Done — checked ${allBadges.length} badges for ${username}.`);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
