@@ -402,8 +402,8 @@ async function preloadThumbnails() {
   const badgeIds = allBadges.map(b => b.id);
   try {
     // SỬA: Dùng trực tiếp RoProxy
-    const target = `https://thumbnails.roproxy.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`;
-    const thumbRes = await fetch(target);
+    const target = encodeURIComponent(`https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`);
+const thumbRes = await fetch(`https://corsproxy.io/?${target}`);
     const thumbData = await thumbRes.json();
     if (thumbData.data) {
       thumbData.data.forEach(item => {
@@ -432,8 +432,8 @@ async function preloadBadgeDetails() {
     await Promise.all(batch.map(async (badge) => {
       try {
         // SỬA: Dùng trực tiếp RoProxy
-        const target = `https://badges.roproxy.com/v1/badges/${badge.id}`;
-        const infoRes = await fetch(target);
+        const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
+const infoRes = await fetch(`https://corsproxy.io/?${target}`);
         if (infoRes.ok) {
           const infoData = await infoRes.json();
           badgeDetailsCache.set(badge.id, {
@@ -465,14 +465,13 @@ async function checkBadges() {
   // Step 1: Username -> User ID
   let userId;
   try {
-    // SỬA: Dùng trực tiếp RoProxy
-    const target = "https://users.roproxy.com/v1/usernames/users";
-    
-    const userRes = await fetch(target, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
-    });
+    // Sửa dòng này:
+const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
+const userRes = await fetch(`https://corsproxy.io/?${target}`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
+});
 
     if (!userRes.ok) {
       const errorText = await userRes.text();
@@ -528,9 +527,8 @@ async function checkBadges() {
     setStatus(`Checking ownership... (${Math.min(i + CHUNK_SIZE, allBadges.length)}/${allBadges.length})`);
 
     try {
-      // SỬA: Dùng trực tiếp RoProxy
-      const target = `https://badges.roproxy.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`;
-      const checkRes = await fetch(target);
+      const target = encodeURIComponent(`https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`);
+const checkRes = await fetch(`https://corsproxy.io/?${target}`);
       
       if (checkRes.ok) {
         const checkData = await checkRes.json();
