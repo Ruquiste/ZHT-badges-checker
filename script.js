@@ -453,31 +453,30 @@ async function checkBadges() {
   setStatus("Looking up username...");
 
   // Step 1: Username -> User ID
-  let userId;
-  try {
-    const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
-    const userRes = await fetch(`${WORKER}/?url=${target}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
-    });
-    
-    if (!userRes.ok) {
-      throw new Error(`HTTP Error: ${userRes.status}`);
-    }
 
-    const userData = await userRes.json();
+let userId;
+try {
 
-    if (!userData.data || userData.data.length === 0) {
-      setStatus("User not found.");
-      return;
-    }
-    userId = userData.data[0].id;
-  } catch (err) {
-    console.error("Username lookup failed:", err);
-    setStatus("Error looking up username. Check console for details.");
+  const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
+  
+  const userRes = await fetch(`${WORKER}/?url=${target}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
+  });
+
+  const userData = await userRes.json();
+
+  if (!userData.data || userData.data.length === 0) {
+    setStatus("User not found!");
     return;
   }
+  userId = userData.data[0].id;
+} catch (err) {
+  console.error("Username lookup failed:", err);
+  setStatus("Error looking up username. Check console for details.");
+  return;
+}
   const allBadges = flattenAllBadges();
 
   // Step 2: Thumbnails
