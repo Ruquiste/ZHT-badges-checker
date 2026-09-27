@@ -142,31 +142,39 @@ function renderSkeleton() {
       contentWrapper.appendChild(list);
 
       // 4. toggle accordion click event
-      regionHeading.addEventListener("click", () => {
-        const isOpen = contentWrapper.classList.contains("open");
-        if (isOpen) {
-          // collapse
-          contentWrapper.style.height = contentWrapper.scrollHeight + "px";
-          void contentWrapper.offsetHeight; // force reflow
-          contentWrapper.style.height = "0px";
-          contentWrapper.classList.remove("open");
-          arrow.classList.remove("open");
-        } else {
-          // expand
-          contentWrapper.classList.add("open");
-          arrow.classList.add("open");
-          contentWrapper.style.height = contentWrapper.scrollHeight + "px";
+regionHeading.addEventListener("click", () => {
+  const isOpen = contentWrapper.classList.contains("open");
+  
+  if (isOpen) {
+    // Collapse
+    contentWrapper.classList.add("animating");
+    contentWrapper.style.height = contentWrapper.scrollHeight + "px";
+    void contentWrapper.offsetHeight; // force reflow
+    contentWrapper.style.height = "0px";
+    contentWrapper.classList.remove("open");
+    arrow.classList.remove("open");
+    
+    contentWrapper.addEventListener("transitionend", function handler(e) {
+      if (e.propertyName === "height") {
+        contentWrapper.classList.remove("animating");
+        contentWrapper.removeEventListener("transitionend", handler);
+      }
+    });
+  } else {
+    // Expand region
+    contentWrapper.classList.add("open", "animating");
+    arrow.classList.add("open");
+    contentWrapper.style.height = contentWrapper.scrollHeight + "px";
 
-          // set to auto after transition so adding expanded subboxes won't clip content
-          const handleEnd = (e) => {
-            if (e.propertyName === "height" && contentWrapper.classList.contains("open")) {
-              contentWrapper.style.height = "auto";
-            }
-            contentWrapper.removeEventListener("transitionend", handleEnd);
-          };
-          contentWrapper.addEventListener("transitionend", handleEnd);
-        }
-      });
+    contentWrapper.addEventListener("transitionend", function handler(e) {
+      if (e.propertyName === "height" && contentWrapper.classList.contains("open")) {
+        contentWrapper.style.height = "auto"; // set to auto so subboxes push lower content down!
+        contentWrapper.classList.remove("animating");
+        contentWrapper.removeEventListener("transitionend", handler);
+      }
+    });
+  }
+});
 
       regionRegistry.set(regionKey, {
         total: totalBadges,
