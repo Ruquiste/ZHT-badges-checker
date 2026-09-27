@@ -1,6 +1,4 @@
-const WORKER = "https://roblox-badge-proxy.nguyenksang19052006.workers.dev";
-
-// placeholder
+// Thay thế Cloudflare Worker bằng dịch vụ RoProxy công cộng
 const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150">
      <rect width="150" height="150" rx="18" fill="#3a3d44"/>
@@ -9,7 +7,6 @@ const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
 );
 
 const badgeRegistry = new Map();
-
 const badgeDetailsCache = new Map();
 
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -24,7 +21,7 @@ function updateProgressSummary(obtained, total) {
     `${obtained} / ${total} badges obtained (${pct}%)`;
 }
 
-// --- bilding bars ---
+// --- Building bars ---
 
 function buildBar(badge) {
   const [r, g, b] = getDifficultyColor(badge.difficulty);
@@ -143,39 +140,39 @@ function renderSkeleton() {
       contentWrapper.appendChild(list);
 
       // 4. toggle accordion click event
-regionHeading.addEventListener("click", () => {
-  const isOpen = contentWrapper.classList.contains("open");
-  
-  if (isOpen) {
-    // Collapse
-    contentWrapper.classList.add("animating");
-    contentWrapper.style.height = contentWrapper.scrollHeight + "px";
-    void contentWrapper.offsetHeight; // force reflow
-    contentWrapper.style.height = "0px";
-    contentWrapper.classList.remove("open");
-    arrow.classList.remove("open");
-    
-    contentWrapper.addEventListener("transitionend", function handler(e) {
-      if (e.propertyName === "height") {
-        contentWrapper.classList.remove("animating");
-        contentWrapper.removeEventListener("transitionend", handler);
-      }
-    });
-  } else {
-    // Expand region
-    contentWrapper.classList.add("open", "animating");
-    arrow.classList.add("open");
-    contentWrapper.style.height = contentWrapper.scrollHeight + "px";
+      regionHeading.addEventListener("click", () => {
+        const isOpen = contentWrapper.classList.contains("open");
+        
+        if (isOpen) {
+          // Collapse
+          contentWrapper.classList.add("animating");
+          contentWrapper.style.height = contentWrapper.scrollHeight + "px";
+          void contentWrapper.offsetHeight; // force reflow
+          contentWrapper.style.height = "0px";
+          contentWrapper.classList.remove("open");
+          arrow.classList.remove("open");
+          
+          contentWrapper.addEventListener("transitionend", function handler(e) {
+            if (e.propertyName === "height") {
+              contentWrapper.classList.remove("animating");
+              contentWrapper.removeEventListener("transitionend", handler);
+            }
+          });
+        } else {
+          // Expand region
+          contentWrapper.classList.add("open", "animating");
+          arrow.classList.add("open");
+          contentWrapper.style.height = contentWrapper.scrollHeight + "px";
 
-    contentWrapper.addEventListener("transitionend", function handler(e) {
-      if (e.propertyName === "height" && contentWrapper.classList.contains("open")) {
-        contentWrapper.style.height = "auto"; // set to auto so subboxes push lower content down!
-        contentWrapper.classList.remove("animating");
-        contentWrapper.removeEventListener("transitionend", handler);
-      }
-    });
-  }
-});
+          contentWrapper.addEventListener("transitionend", function handler(e) {
+            if (e.propertyName === "height" && contentWrapper.classList.contains("open")) {
+              contentWrapper.style.height = "auto";
+              contentWrapper.classList.remove("animating");
+              contentWrapper.removeEventListener("transitionend", handler);
+            }
+          });
+        }
+      });
 
       regionRegistry.set(regionKey, {
         total: totalBadges,
@@ -213,7 +210,6 @@ function updateRegionProgress() {
     data.obtained = obtainedCount;
     data.countEl.textContent = `${obtainedCount} / ${data.total}`;
 
-    // roygbiv if 100%
     if (obtainedCount === data.total && data.total > 0) {
       if (!data.nameEl.classList.contains("completed")) {
         data.nameEl.classList.add("completed");
@@ -221,7 +217,6 @@ function updateRegionProgress() {
         data.nameEl.appendChild(createRainbowText(data.originalName));
       }
     } else {
-      // revert if incomplete
       if (data.nameEl.classList.contains("completed")) {
         data.nameEl.classList.remove("completed");
         data.nameEl.textContent = data.originalName;
@@ -230,7 +225,7 @@ function updateRegionProgress() {
   });
 }
 
-// --- subboxes something ---
+// --- Subboxes ---
 
 function addRow(container, label, value, strong) {
   const row = document.createElement("div");
@@ -379,18 +374,17 @@ function closeSubbox(entry) {
   });
 }
 
-// rebuild a subbox's content in place
 function refreshSubboxIfOpen(badge) {
   const entry = badgeRegistry.get(badge.id);
   if (entry && entry.subboxEl) {
     const fresh = buildSubboxContent(badge, entry.owned);
-    fresh.querySelector(".badge-subbox-inner").style.height = "auto"; // stay open, no re-animation
+    fresh.querySelector(".badge-subbox-inner").style.height = "auto";
     entry.subboxEl.replaceWith(fresh);
     entry.subboxEl = fresh;
   }
 }
 
-// --- fetching live data for a username ---
+// --- Fetching live data for a username ---
 
 function flattenAllBadges() {
   const all = [];
@@ -407,10 +401,9 @@ async function preloadThumbnails() {
   setStatus("Loading badge images...");
   const badgeIds = allBadges.map(b => b.id);
   try {
-    const target = encodeURIComponent(
-      `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`
-    );
-    const thumbRes = await fetch(`${WORKER}/?url=${target}`);
+    // SỬA: Dùng trực tiếp RoProxy
+    const target = `https://thumbnails.roproxy.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`;
+    const thumbRes = await fetch(target);
     const thumbData = await thumbRes.json();
     if (thumbData.data) {
       thumbData.data.forEach(item => {
@@ -438,8 +431,9 @@ async function preloadBadgeDetails() {
     
     await Promise.all(batch.map(async (badge) => {
       try {
-        const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
-        const infoRes = await fetch(`${WORKER}/?url=${target}`);
+        // SỬA: Dùng trực tiếp RoProxy
+        const target = `https://badges.roproxy.com/v1/badges/${badge.id}`;
+        const infoRes = await fetch(target);
         if (infoRes.ok) {
           const infoData = await infoRes.json();
           badgeDetailsCache.set(badge.id, {
@@ -469,41 +463,44 @@ async function checkBadges() {
   setStatus("Looking up username...");
 
   // Step 1: Username -> User ID
-let userId;
-try {
-  const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
-  
-  const userRes = await fetch(`${WORKER}/?url=${target}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
-  });
-  if (!userRes.ok) {
-    const errorText = await userRes.text();
-    console.error(`Roblox API Error ${userRes.status}:`, errorText);
+  let userId;
+  try {
+    // SỬA: Dùng trực tiếp RoProxy
+    const target = "https://users.roproxy.com/v1/usernames/users";
     
-    if (userRes.status === 429) {
-      setStatus("Roblox is rate-limiting requests. Please wait a minute and try again.");
-    } else {
-      setStatus(`Roblox API Error (${userRes.status}). Check console.`);
+    const userRes = await fetch(target, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
+    });
+
+    if (!userRes.ok) {
+      const errorText = await userRes.text();
+      console.error(`Roblox API Error ${userRes.status}:`, errorText);
+      
+      if (userRes.status === 429) {
+        setStatus("Roblox is rate-limiting requests. Please wait a minute and try again.");
+      } else {
+        setStatus(`Roblox API Error (${userRes.status}). Check console.`);
+      }
+      return;
     }
+
+    const userData = await userRes.json();
+
+    if (!userData.data || userData.data.length === 0) {
+      setStatus("User not found! Check your spelling.");
+      return;
+    }
+    
+    userId = userData.data[0].id;
+    
+  } catch (err) {
+    console.error("Username lookup failed:", err);
+    setStatus("Error looking up username. Check console for details.");
     return;
   }
 
-  const userData = await userRes.json();
-
-  if (!userData.data || userData.data.length === 0) {
-    setStatus("User not found! Check your spelling.");
-    return;
-  }
-  
-  userId = userData.data[0].id;
-  
-} catch (err) {
-  console.error("Username lookup failed:", err);
-  setStatus("Error looking up username. Check console for details.");
-  return;
-}
   const allBadges = flattenAllBadges();
 
   // Step 2: Thumbnails
@@ -526,20 +523,17 @@ try {
   
   for (let i = 0; i < allBadges.length; i += CHUNK_SIZE) {
     const chunk = allBadges.slice(i, i + CHUNK_SIZE);
-    
     const badgeIdsCsv = chunk.map(b => b.id).join(',');
     
     setStatus(`Checking ownership... (${Math.min(i + CHUNK_SIZE, allBadges.length)}/${allBadges.length})`);
 
     try {
-      const target = encodeURIComponent(
-        `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`
-      );
-      const checkRes = await fetch(`${WORKER}/?url=${target}`);
+      // SỬA: Dùng trực tiếp RoProxy
+      const target = `https://badges.roproxy.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${badgeIdsCsv}`;
+      const checkRes = await fetch(target);
       
       if (checkRes.ok) {
         const checkData = await checkRes.json();
-        
         const ownedIds = new Set(checkData.data.map(item => item.badgeId));
 
         chunk.forEach(badge => {
