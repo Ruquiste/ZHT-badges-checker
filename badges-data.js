@@ -1,9 +1,9 @@
 /* ============================================================
-   HARD-CODE YOUR BADGE DATA HERE
+   HARD CODING DATA
    ============================================================
    Structure: CHANNELS -> worlds -> regions -> badges
 
-   For each badge, fill in:
+   For each badge:
      acronym    : short code shown on the left of the bar (e.g. "ToLTC")
      id         : the Roblox badge ID (number)
      fullName   : full badge name, hard-coded
@@ -11,11 +11,9 @@
      length     : hard-coded text, e.g. "Short", "12 min", "Long"
      type       : hard-coded text, e.g. "Tower", "Obby", "Puzzle"
 
-   description and winners (awardedCount) are pulled live from Roblox
-   when you check a username, so you don't need to fill those in.
-
    To add a new region: copy a region block and change its "id"/"name".
    To add a new world: copy a whole world block.
+   :thumbs_up:
    ============================================================ */
 
 const CHANNELS = [
@@ -26,19 +24,22 @@ const CHANNELS = [
         id: "region1",
         name: "Region 1 - Forgotten Grasslands",
         badges: [
-          { acronym: "ToLTC", id: 1521318689699521, fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "ToSP",  id: 2124841912,        fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "ToHPC", id: 2124841913,        fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "ToSO",  id: 2124841914,        fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "SoUX",  id: 2148033909,        fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "ToD",   id: 2124841915,        fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "ToUC",  id: 2148033874,        fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "ATIG",  id: 2148033956,        fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "ToCD",  id: 2148033989,        fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "ToTV",  id: 2148034006,        fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "CoPV",  id: 2148066194,        fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "ToPO",  id: 2148066223,        fullName: "", difficulty: 1.00, length: "", type: "" },
-          { acronym: "ToRQ",  id: 2148066240,        fullName: "", difficulty: 1.00, length: "", type: "" },
+          { acronym: "ToBE",  id: 2124799722,        fullName: "Tower of Beginner's Expedition", difficulty: 1.08, length: "< 20 minutes", type: "Tower" },
+          { acronym: "ToAK",  id: 2124841910,        fullName: "Tower of Anxious Knockoff", difficulty: 1.90, length: "< 20 minutes", type: "Tower" },
+          { acronym: "ToOPS", id: 2124841911,        fullName: "Tower of Outdoor Pipe System", difficulty: 2.41, length: "< 20 minutes", type: "Tower" },
+          { acronym: "ToLTC", id: 1521318689699521,  fullName: "Tower of Lengthy Tree Climbing", difficulty: 3.00, length: "< 20 minutes", type: "Tower" },
+          { acronym: "ToSP",  id: 2124841912,        fullName: "Tower of Simple Platforming", difficulty: 3.33, length: "< 20 minutes", type: "Tower" },
+          { acronym: "ToHPC", id: 2124841913,        fullName: "Tower of Horrible Placement Choices", difficulty: 4.24, length: "< 20 minutes", type: "Tower" },
+          { acronym: "ToSO",  id: 2124841914,        fullName: "Tower of Square One", difficulty: 4.82, length: "< 20 minutes", type: "Tower" },
+          { acronym: "SoUX",  id: 2148033909,        fullName: "Steeple of Uncovered Xeriscapes", difficulty: 4.99, length: "< 20 minutes", type: "Steeple" },
+          { acronym: "ToD",   id: 2124841915,        fullName: "Tower of Doom", difficulty: 5.31, length: "< 20 minutes", type: "Tower" },
+          { acronym: "ToUC",  id: 2148033874,        fullName: "Tower of Unskilled Challenges", difficulty: 5.82, length: "30+ minutes", type: "Tower" },
+          { acronym: "ATIG",  id: 2148033956,        fullName: "A Tower I Guess", difficulty: 6.06, length: "< 20 minutes", type: "Mini Tower" },
+          { acronym: "ToCD",  id: 2148033989,        fullName: "Tower of Color Destruction", difficulty: 6.17, length: "< 20 minutes", type: "Tower" },
+          { acronym: "ToTV",  id: 2148034006,        fullName: "Tower of Thermal Velocity", difficulty: 7.63, length: "< 20 minutes", type: "Tower" },
+          { acronym: "CoPV",  id: 2148066194,        fullName: "Citadel of Positive Vibes", difficulty: 7.68, length: "30+ minutes", type: "Citadel" },
+          { acronym: "ToPO",  id: 2148066223,        fullName: "Tower of Purist Obsecurity", difficulty: 8.82, length: "< 20 minutes", type: "Tower" },
+          { acronym: "ToRQ",  id: 2148066240,        fullName: "Tower of Rage Quitting", difficulty: 9.76, length: "45+ minutes", type: "Tower" },
         ]
       },
       { id: "region1b", name: "Region 1B - Nostalgic Realm", badges: [
