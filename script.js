@@ -9,22 +9,131 @@ const PLACEHOLDER_IMG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
 );
 
 const badgeRegistry = new Map();
-
 const badgeDetailsCache = new Map();
+const regionRegistry = new Map();
+const thumbsDone = new Set();
+
+let thumbnailsLoaded = false;
+let detailsLoaded = false;
+let thumbsInFlight = null;
+let detailsInFlight = null;
+
+// ---------- run management ----------
+let currentRunId = 0;
+let currentAbortController = null;
+
+// ---------- tunables ----------
+const OWNERSHIP_BATCH_SIZE = 50;
+const BATCH_CONCURRENCY = 2;
+const FALLBACK_CONCURRENCY = 3;
+const FALLBACK_PASSES = 3;
+const DETAILS_CONCURRENCY = 4;
+const THUMB_BATCH_SIZE = 50;
+const REQUEST_TIMEOUT_MS = 12000;
+const MAX_RETRIES = 5;
+const BASE_BACKOFF_MS = 650;
 
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function setStatus(text) {
-  document.getElementById("status-line").textContent = text;
+  const el = document.getElementById("status-line");
+  if (el) el.textContent = text;
 }
 
 function updateProgressSummary(obtained, total) {
+  const el = document.getElementById("progress-summary");
+  if (!el) return;
   const pct = total ? Math.round((obtained / total) * 100) : 0;
-  document.getElementById("progress-summary").textContent =
-    `${obtained} / ${total} badges obtained (${pct}%)`;
+  el.textContent = `${obtained} / ${total} badges obtained (${pct}%)`;
 }
 
-// --- bilding bars ---
+function chunkArray(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+const RETRYABLE_STATUSES = new Set([403, 408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
+let globalCooldownUntil = 0;
+
+function backoffDelay(attempt, retryAfterHeader) {
+  if (retryAfterHeader) {
+    const secs = parseFloat(retryAfterHeader);
+    if (!isNaN(secs)) return Math.min(secs * 1000, 15000);
+  }
+  const jitter = Math.random() * 300;
+  return Math.min(BASE_BACKOFF_MS * Math.pow(1.8, attempt), 8000) + jitter;
+}
+
+async function waitForCooldown(signal) {
+  while (true) {
+    const wait = globalCooldownUntil - Date.now();
+    if (wait <= 0) return;
+    if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
+    await delay(Math.min(wait, 400));
+  }
+}
+
+async function fetchWithRetry(url, options = {}, { retries = MAX_RETRIES, signal } = {}) {
+  let lastErr;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
+    await waitForCooldown(signal);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const onOuterAbort = () => controller.abort();
+    if (signal) signal.addEventListener("abort", onOuterAbort);
+
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener("abort", onOuterAbort);
+
+      if (res.ok) return res;
+
+      if (RETRYABLE_STATUSES.has(res.status) && attempt < retries) {
+        const d = backoffDelay(attempt, res.headers.get("Retry-After"));
+        if (res.status === 429 || res.status === 403) {
+          globalCooldownUntil = Math.max(globalCooldownUntil, Date.now() + d);
+        }
+        await delay(d);
+        continue;
+      }
+      return res; // not retryable
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener("abort", onOuterAbort);
+      if (err.name === "AbortError" && signal && signal.aborted) throw err; // cancelled by newer run
+
+      lastErr = err;
+      if (attempt < retries) {
+        await delay(backoffDelay(attempt));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr || new Error("fetchWithRetry: exhausted retries");
+}
+
+async function runPool(items, worker, concurrency = 6) {
+  let idx = 0;
+  async function next() {
+    while (idx < items.length) {
+      const cur = idx++;
+      try {
+        await worker(items[cur], cur);
+      } catch (err) {
+        if (err.name !== "AbortError") console.error("Pool item failed:", err);
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, next));
+}
+
+// --- building bars ---
 
 function buildBar(badge) {
   const [r, g, b] = getDifficultyColor(badge.difficulty);
@@ -67,22 +176,34 @@ function buildBar(badge) {
   return bar;
 }
 
-const regionRegistry = new Map();
-
 function createRainbowText(text) {
   const frag = document.createDocumentFragment();
   for (let i = 0; i < text.length; i++) {
     const span = document.createElement("span");
     span.className = "rainbow-char";
     span.textContent = text[i];
-    span.style.animationDelay = `${i * 0.75}s`;
+    span.style.animationDelay = `-${(i * 0.12).toFixed(2)}s`;
+    span.style.animationDuration = "1.2s";
     frag.appendChild(span);
   }
   return frag;
 }
 
+const CLIP_WHILE_ANIMATING = "inset(-80px -40px 0px -40px)";
+
+function transitionMs(el) {
+  const cs = getComputedStyle(el);
+  const parse = s => Math.max(0, ...String(s).split(",").map(v => {
+    const n = parseFloat(v);
+    if (isNaN(n)) return 0;
+    return v.includes("ms") ? n : n * 1000;
+  }));
+  return parse(cs.transitionDuration) + parse(cs.transitionDelay);
+}
+
 function renderSkeleton() {
   const container = document.getElementById("channels-container");
+  if (!container) return;
   container.innerHTML = "";
   regionRegistry.clear();
 
@@ -142,40 +263,55 @@ function renderSkeleton() {
 
       contentWrapper.appendChild(list);
 
-      // 4. toggle accordion click event
-regionHeading.addEventListener("click", () => {
-  const isOpen = contentWrapper.classList.contains("open");
-  
-  if (isOpen) {
-    // Collapse
-    contentWrapper.classList.add("animating");
-    contentWrapper.style.height = contentWrapper.scrollHeight + "px";
-    void contentWrapper.offsetHeight; // force reflow
-    contentWrapper.style.height = "0px";
-    contentWrapper.classList.remove("open");
-    arrow.classList.remove("open");
-    
-    contentWrapper.addEventListener("transitionend", function handler(e) {
-      if (e.propertyName === "height") {
-        contentWrapper.classList.remove("animating");
-        contentWrapper.removeEventListener("transitionend", handler);
-      }
-    });
-  } else {
-    // Expand region
-    contentWrapper.classList.add("open", "animating");
-    arrow.classList.add("open");
-    contentWrapper.style.height = contentWrapper.scrollHeight + "px";
+      // 4. toggle accordion
+      let toggleToken = 0;
+      regionHeading.addEventListener("click", () => {
+        const myToken = ++toggleToken;
+        const wasOpen = contentWrapper.classList.contains("open");
 
-    contentWrapper.addEventListener("transitionend", function handler(e) {
-      if (e.propertyName === "height" && contentWrapper.classList.contains("open")) {
-        contentWrapper.style.height = "auto"; // set to auto so subboxes push lower content down!
-        contentWrapper.classList.remove("animating");
-        contentWrapper.removeEventListener("transitionend", handler);
-      }
-    });
-  }
-});
+        contentWrapper.style.overflow = "visible";
+        contentWrapper.style.clipPath = CLIP_WHILE_ANIMATING;
+        contentWrapper.classList.add("animating");
+
+        let finished = false;
+        let fallbackTimer = null;
+
+        const finish = () => {
+          contentWrapper.removeEventListener("transitionend", onEnd);
+          clearTimeout(fallbackTimer);
+          if (finished || myToken !== toggleToken) return;
+          finished = true;
+
+          contentWrapper.style.clipPath = "";
+          contentWrapper.classList.remove("animating");
+          if (wasOpen) {
+            contentWrapper.style.overflow = "hidden"; // fully closed
+          } else {
+            contentWrapper.style.height = "auto";     // let subboxes push content down
+            contentWrapper.style.overflow = "visible";
+          }
+        };
+
+        const onEnd = (e) => {
+          if (e.target === contentWrapper && e.propertyName === "height") finish();
+        };
+        contentWrapper.addEventListener("transitionend", onEnd);
+
+        if (wasOpen) {
+          contentWrapper.style.height = contentWrapper.offsetHeight + "px";
+          void contentWrapper.offsetHeight; // force reflow
+          contentWrapper.style.height = "0px";
+          contentWrapper.classList.remove("open");
+          arrow.classList.remove("open");
+        } else {
+          contentWrapper.classList.add("open");
+          arrow.classList.add("open");
+          contentWrapper.style.height = contentWrapper.scrollHeight + "px";
+        }
+
+        // safety net in case transitionend never fires
+        fallbackTimer = setTimeout(finish, transitionMs(contentWrapper) + 150);
+      });
 
       regionRegistry.set(regionKey, {
         total: totalBadges,
@@ -220,17 +356,14 @@ function updateRegionProgress() {
         data.nameEl.textContent = "";
         data.nameEl.appendChild(createRainbowText(data.originalName));
       }
-    } else {
-      // revert if incomplete
-      if (data.nameEl.classList.contains("completed")) {
-        data.nameEl.classList.remove("completed");
-        data.nameEl.textContent = data.originalName;
-      }
+    } else if (data.nameEl.classList.contains("completed")) {
+      data.nameEl.classList.remove("completed");
+      data.nameEl.textContent = data.originalName;
     }
   });
 }
 
-// --- subboxes something ---
+// --- subboxes ---
 
 function addRow(container, label, value, strong) {
   const row = document.createElement("div");
@@ -273,7 +406,7 @@ function buildSubboxContent(badge, owned) {
 
   inner.appendChild(content);
   box.appendChild(inner);
-  
+
   return box;
 }
 
@@ -334,6 +467,7 @@ function openSubbox(entry) {
   });
 
   inner.addEventListener("transitionend", function handler(e) {
+    if (e.target !== inner) return;
     if (e.propertyName === "height") {
       if (entry.subboxEl === box && entry.animState === "opening") {
         inner.style.height = "auto";
@@ -368,6 +502,7 @@ function closeSubbox(entry) {
   });
 
   inner.addEventListener("transitionend", function handler(e) {
+    if (e.target !== inner) return;
     if (e.propertyName === "height") {
       inner.removeEventListener("transitionend", handler);
       if (entry.subboxEl === box) {
@@ -390,7 +525,7 @@ function refreshSubboxIfOpen(badge) {
   }
 }
 
-// --- fetching live data for a username ---
+// --- static data preloading (thumbnails + badge details) ---
 
 function flattenAllBadges() {
   const all = [];
@@ -398,160 +533,344 @@ function flattenAllBadges() {
   return all;
 }
 
-let thumbnailsLoaded = false;
-
 async function preloadThumbnails() {
   const allBadges = flattenAllBadges();
-  if (!allBadges.length) return;
+  if (!allBadges.length) { thumbnailsLoaded = true; return; }
 
-  setStatus("Loading badge images...");
-  const badgeIds = allBadges.map(b => b.id);
-  try {
-    const target = encodeURIComponent(
-      `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${badgeIds.join(",")}&size=150x150&format=Png`
-    );
-    const thumbRes = await fetch(`${WORKER}/?url=${target}`);
-    const thumbData = await thumbRes.json();
-    if (thumbData.data) {
-      thumbData.data.forEach(item => {
-        const entry = badgeRegistry.get(item.targetId);
-        if (entry && item.imageUrl) entry.imgEl.src = item.imageUrl;
-      });
-    }
-    thumbnailsLoaded = true;
-    setStatus("");
-  } catch (err) {
-    console.error("Thumbnail preload failed:", err);
-    setStatus("Couldn't preload badge images — check console for details.");
+  const quiet = currentRunId !== 0; // don't overwrite status text during a check
+  if (!quiet) setStatus("Loading badge images...");
+
+  let missing = allBadges.map(b => b.id).filter(id => !thumbsDone.has(id));
+
+  for (let pass = 0; pass < 3 && missing.length; pass++) {
+    await runPool(chunkArray(missing, THUMB_BATCH_SIZE), async (ids) => {
+      try {
+        const target = encodeURIComponent(
+          `https://thumbnails.roblox.com/v1/badges/icons?badgeIds=${ids.join(",")}&size=150x150&format=Png`
+        );
+        const res = await fetchWithRetry(`${WORKER}/?url=${target}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        (data.data || []).forEach(item => {
+          const entry = badgeRegistry.get(item.targetId);
+          if (entry && item.imageUrl) {
+            entry.imgEl.src = item.imageUrl;
+            thumbsDone.add(item.targetId);
+          }
+        });
+      } catch (err) {
+        console.error("Thumbnail batch failed:", err);
+      }
+    }, 2);
+
+    missing = missing.filter(id => !thumbsDone.has(id));
+    if (missing.length) await delay(1200);
+  }
+
+  thumbnailsLoaded = missing.length === 0;
+  if (!quiet && currentRunId === 0) {
+    setStatus(thumbnailsLoaded ? "" : "Some badge images couldn't load, will retry next check");
   }
 }
 
-let detailsLoaded = false;
-
 async function preloadBadgeDetails() {
   const allBadges = flattenAllBadges();
-  if (!allBadges.length) return;
+  if (!allBadges.length) { detailsLoaded = true; return; }
 
-  // fetch all badge details without delay
-  const fetchPromises = allBadges.map(async (badge) => {
-    try {
-      const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
-      const infoRes = await fetch(`${WORKER}/?url=${target}`);
-      if (infoRes.ok) {
-        const infoData = await infoRes.json();
+  for (let pass = 0; pass < 2; pass++) {
+    const missing = allBadges.filter(b => !badgeDetailsCache.has(b.id));
+    if (!missing.length) break;
+
+    await runPool(missing, async (badge) => {
+      try {
+        const target = encodeURIComponent(`https://badges.roblox.com/v1/badges/${badge.id}`);
+        const res = await fetchWithRetry(`${WORKER}/?url=${target}`);
+        if (!res.ok) return;
+        const info = await res.json();
         badgeDetailsCache.set(badge.id, {
-          description: infoData.description || "",
-          awardedCount: infoData.statistics ? infoData.statistics.awardedCount : undefined
+          description: info.description || "",
+          awardedCount: info.statistics ? info.statistics.awardedCount : undefined
         });
         refreshSubboxIfOpen(badge);
+      } catch (err) {
+        console.error(`Badge info fetch failed for ${badge.id}:`, err);
       }
-    } catch (err) {
-      console.error(`Badge info fetch failed for ${badge.id}:`, err);
+    }, DETAILS_CONCURRENCY);
+  }
+
+  detailsLoaded = allBadges.every(b => badgeDetailsCache.has(b.id));
+}
+
+// de-duplicated so page-load preloads and checkBadges() never double-fire
+function ensureThumbnails() {
+  if (thumbnailsLoaded) return Promise.resolve();
+  if (!thumbsInFlight) thumbsInFlight = preloadThumbnails().finally(() => { thumbsInFlight = null; });
+  return thumbsInFlight;
+}
+function ensureDetails() {
+  if (detailsLoaded) return Promise.resolve();
+  if (!detailsInFlight) detailsInFlight = preloadBadgeDetails().finally(() => { detailsInFlight = null; });
+  return detailsInFlight;
+}
+
+// --- ownership checking ---
+
+async function fetchOwnedBatch(userId, badges, signal) {
+  try {
+    const ids = badges.map(b => b.id).join(",");
+    const target = encodeURIComponent(
+      `https://badges.roblox.com/v1/users/${userId}/badges/awarded-dates?badgeIds=${ids}`
+    );
+    const res = await fetchWithRetry(`${WORKER}/?url=${target}`, {}, { signal });
+    if (!res.ok) {
+      console.error(`Batch ownership check HTTP ${res.status}`);
+      return null;
+    }
+    const json = await res.json();
+    if (!json || !Array.isArray(json.data)) return null;
+    return new Set(json.data.map(d => Number(d.badgeId)));
+  } catch (err) {
+    if (err.name === "AbortError") throw err;
+    console.error("Batch ownership check failed:", err);
+    return null;
+  }
+}
+
+// Fallback: single-badge lookup. Returns true / false / null (= unknown).
+async function fetchOwnedSingle(userId, badge, signal) {
+  try {
+    const target = encodeURIComponent(
+      `https://inventory.roblox.com/v1/users/${userId}/items/Badge/${badge.id}`
+    );
+    const res = await fetchWithRetry(`${WORKER}/?url=${target}`, {}, { signal });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (!json || !Array.isArray(json.data)) return null;
+    return json.data.length > 0;
+  } catch (err) {
+    if (err.name === "AbortError") throw err;
+    return null;
+  }
+}
+
+function applyOwnership(badge, owned) {
+  const entry = badgeRegistry.get(badge.id);
+  if (!entry) return;
+  entry.owned = owned;
+  entry.barEl.classList.toggle("locked", !owned);
+  entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
+  entry.imgWrapEl.classList.toggle("wobble", owned);
+  refreshSubboxIfOpen(badge);
+}
+
+function markUnknown(badge) {
+  const entry = badgeRegistry.get(badge.id);
+  if (!entry) return;
+  entry.owned = false;
+  entry.barEl.classList.add("locked");
+  entry.statusTagEl.textContent = "COULDN'T VERIFY";
+  entry.imgWrapEl.classList.remove("wobble");
+}
+
+// Resets on-screen state so checkBadges() can be re-run without a refresh.
+function resetBadgeStates() {
+  badgeRegistry.forEach(entry => {
+    entry.owned = false;
+    entry.barEl.classList.add("locked");
+    entry.statusTagEl.textContent = "CHECKING…";
+    entry.imgWrapEl.classList.remove("wobble");
+    if (entry.subboxEl) refreshSubboxIfOpen(entry.badge);
+  });
+  regionRegistry.forEach(data => {
+    data.obtained = 0;
+    data.countEl.textContent = `0 / ${data.total}`;
+    if (data.nameEl.classList.contains("completed")) {
+      data.nameEl.classList.remove("completed");
+      data.nameEl.textContent = data.originalName;
     }
   });
-
-  await Promise.all(fetchPromises);
-  detailsLoaded = true;
+  updateProgressSummary(0, flattenAllBadges().length);
 }
 
 async function checkBadges() {
-  const username = document.getElementById("username").value.trim();
+  const usernameInput = document.getElementById("username");
+  const username = usernameInput ? usernameInput.value.trim() : "";
   if (!username) {
     alert("Please enter a username.");
     return;
   }
 
+  // Cancel any run already in flight and start a clean new one.
+  currentRunId += 1;
+  const runId = currentRunId;
+  if (currentAbortController) currentAbortController.abort();
+  const abortController = new AbortController();
+  currentAbortController = abortController;
+  const signal = abortController.signal;
+
+  resetBadgeStates();
   setStatus("Looking up username...");
 
   // Step 1: Username -> User ID
-let userId;
-try {
-  const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
-  
-  const userRes = await fetch(`${WORKER}/?url=${target}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
-  });
-  if (!userRes.ok) {
-    const errorText = await userRes.text();
-    console.error(`Roblox API Error ${userRes.status}:`, errorText);
-    
-    if (userRes.status === 429) {
-      setStatus("Roblox is rate-limiting requests. Please wait a minute and try again.");
-    } else {
-      setStatus(`Roblox API Error (${userRes.status}). Check console.`);
-    }
-    return;
-  }
+  let userId;
+  try {
+    const target = encodeURIComponent("https://users.roblox.com/v1/usernames/users");
+    const userRes = await fetchWithRetry(`${WORKER}/?url=${target}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
+    }, { signal });
 
-  const userData = await userRes.json();
+    if (runId !== currentRunId) return;
 
-  if (!userData.data || userData.data.length === 0) {
-    setStatus("User not found! Check your spelling.");
-    return;
-  }
-  
-  userId = userData.data[0].id;
-  
-} catch (err) {
-  console.error("Username lookup failed:", err);
-  setStatus("Error looking up username. Check console for details.");
-  return;
-}
-  const allBadges = flattenAllBadges();
+    if (!userRes.ok) {
+      const errorText = await userRes.text().catch(() => "");
+      console.error(`Roblox API Error ${userRes.status}:`, errorText);
 
-  // Step 2: Thumbnails
-  if (!thumbnailsLoaded) {
-    setStatus("Loading badge images...");
-    await preloadThumbnails();
-  }
-
-  // Step 3: Badge info (description + winners)
-  if (!detailsLoaded) {
-    setStatus("Loading badge details...");
-    await preloadBadgeDetails();
-  }
-
-  // Step 4: Ownership check per badge
-  let obtainedCount = 0;
-  updateProgressSummary(0, allBadges.length);
-
-  for (let i = 0; i < allBadges.length; i++) {
-    const badge = allBadges[i];
-    setStatus(`Checking ownership... (${i + 1}/${allBadges.length})`);
-    try {
-      const target = encodeURIComponent(
-        `https://inventory.roblox.com/v1/users/${userId}/items/Badge/${badge.id}`
-      );
-      const checkRes = await fetch(`${WORKER}/?url=${target}`);
-      if (checkRes.ok) {
-        const checkData = await checkRes.json();
-        const owned = checkData && checkData.data && checkData.data.length > 0;
-        const entry = badgeRegistry.get(badge.id);
-        if (entry) {
-          entry.owned = owned;
-          entry.barEl.classList.toggle("locked", !owned);
-          entry.statusTagEl.textContent = owned ? "OWNED" : "UNOBTAINED";
-          entry.imgWrapEl.classList.toggle("wobble", owned);
-          refreshSubboxIfOpen(badge);
-        }
-        if (owned) obtainedCount++;
-        updateProgressSummary(obtainedCount, allBadges.length);
-        updateRegionProgress();
+      if (userRes.status === 429) {
+        setStatus("Roblox is rate-limiting requests. Wait a bit (like a minute) and try again.");
+      } else if (userRes.status === 403) {
+        setStatus("The proxy or Roblox is temporarily refusing requests. Try again shortly (kinda annoying ik).");
+      } else if (userRes.status >= 500) {
+        setStatus(`Server error (${userRes.status}) from Roblox/the proxy. Try again in a moment.`);
+      } else {
+        setStatus(`Roblox API Error (${userRes.status}). Check console.`);
       }
-    } catch (err) {
-      console.error(`Ownership check failed for badge ${badge.id}:`, err);
+      return;
     }
-    await delay(400);
+
+    const userData = await userRes.json();
+    if (!userData.data || userData.data.length === 0) {
+      setStatus("User not found. Did you wrote name correctly?");
+      return;
+    }
+    userId = userData.data[0].id;
+
+  } catch (err) {
+    if (err.name === "AbortError") return;
+    console.error("Username lookup failed:", err);
+    setStatus("Error looking up username (network issue). Check console for details.");
+    return;
   }
 
-  setStatus(`Finished checking ${allBadges.length} badges for ${username}.`);
+  const allBadges = flattenAllBadges();
+  const total = allBadges.length;
+  let resolvedCount = 0;
+  let obtainedCount = 0;
+
+  const resolve = (badge, owned) => {
+    applyOwnership(badge, owned);
+    resolvedCount++;
+    if (owned) obtainedCount++;
+  };
+  const refresh = () => {
+    if (runId !== currentRunId) return;
+    setStatus(`Checking ownership... (${resolvedCount}/${total})`);
+    updateProgressSummary(obtainedCount, total);
+    updateRegionProgress();
+  };
+
+  updateProgressSummary(0, total);
+  setStatus("Checking badges...");
+
+  try {
+    // Step 2: batched ownership check (a handful of requests total)
+    let pending = [];
+    await runPool(chunkArray(allBadges, OWNERSHIP_BATCH_SIZE), async (chunk) => {
+      const ownedSet = await fetchOwnedBatch(userId, chunk, signal);
+      if (runId !== currentRunId) return;
+      if (ownedSet) chunk.forEach(b => resolve(b, ownedSet.has(Number(b.id))));
+      else pending.push(...chunk);
+      refresh();
+    }, BATCH_CONCURRENCY);
+
+    if (runId !== currentRunId) return;
+
+    // Step 3: anything the batch couldn't answer is retried one-by-one,
+    // several passes, sharing the global rate-limit cooldown
+    for (let pass = 1; pass <= FALLBACK_PASSES && pending.length && runId === currentRunId; pass++) {
+      setStatus(`Some checks failed - retrying ${pending.length} badge(s)... (attempt ${pass}/${FALLBACK_PASSES})`);
+      const stillPending = [];
+
+      await runPool(pending, async (badge) => {
+        if (runId !== currentRunId) return;
+        const owned = await fetchOwnedSingle(userId, badge, signal);
+        if (runId !== currentRunId) return;
+        if (owned === null) stillPending.push(badge);
+        else resolve(badge, owned);
+        refresh();
+      }, FALLBACK_CONCURRENCY);
+
+      pending = stillPending;
+      if (pending.length && pass < FALLBACK_PASSES) await delay(1500 * pass);
+    }
+
+    if (runId !== currentRunId) return;
+
+    // Anything left is shown as "couldn't verify" - never silently as UNOBTAINED
+    pending.forEach(markUnknown);
+    updateProgressSummary(obtainedCount, total);
+    updateRegionProgress();
+
+    if (pending.length) {
+      setStatus(`${pending.length} badge(s) couldn't be verified. You can press check again to retry.`);
+    } else {
+      setStatus(`Finished checking ${total} badges for ${username}.`);
+    }
+  } catch (err) {
+    if (err.name === "AbortError") return;
+    console.error("Badges check crashed:", err);
+    setStatus("Something went wrong while checking badges. Check console for details.");
+    return;
+  }
+
+  // Step 4: cosmetic data (images + descriptions) loads after the important part
+  ensureThumbnails();
+  ensureDetails();
+}
+
+// ---------- intro text / credit tweaks ----------
+
+const INTRO_LINE_1 =
+  "Hi, this is a custom made tracker for zKatanas's Hectic Towers, I made this since TowerStats looks kinda boring. " +
+  "Now keep in mind it can sometimes be slow due to Roblox's API rate limits and might be at times inaccurate. Hope you like.";
+const INTRO_LINE_2 = "DM me if you want one (not free ofc)";
+
+function findDeepestByText(regex) {
+  const skip = new Set(["SCRIPT", "STYLE", "NOSCRIPT"]);
+  const candidates = Array.from(document.body.querySelectorAll("*"))
+    .filter(el => !skip.has(el.tagName) && !el.closest("script, style, noscript") && regex.test(el.textContent));
+  return candidates.find(el => !Array.from(el.children).some(ch => regex.test(ch.textContent))) || null;
+}
+
+function applyIntroText() {
+  const hint = findDeepestByText(/click a bar to see full details/i);
+  if (hint) {
+    hint.textContent = "";
+    hint.appendChild(document.createTextNode(INTRO_LINE_1));
+    hint.appendChild(document.createElement("br"));
+    hint.appendChild(document.createTextNode(INTRO_LINE_2));
+    Object.assign(hint.style, {
+  fontWeight: "300",
+  fontSize: "0.9em",
+  lineHeight: "1.55",
+  letterSpacing: "0.01em",
+  maxWidth: "none",
+  width: "100%",
+  marginLeft: "0",
+  marginRight: "0",
+  textAlign: "left",
+  opacity: "0.9"
+});
+  }
+
+  const credit = findDeepestByText(/made by[\s\S]*ruquiste/i);
+  if (credit) credit.style.translate = "0 22px";
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   renderSkeleton();
+  applyIntroText();
   updateProgressSummary(0, flattenAllBadges().length);
-  preloadThumbnails();
-  preloadBadgeDetails();
+  ensureThumbnails().then(ensureDetails);
 });
